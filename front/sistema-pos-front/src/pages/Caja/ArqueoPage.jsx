@@ -1,0 +1,241 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  Row, Col, Card, Typography, Button, Table, Tag, Modal,
+  Form, InputNumber, Space, Divider, Alert, Statistic, Input,
+  Result, Spin
+} from 'antd';
+import { 
+  LockOutlined, DollarOutlined, CalculatorOutlined, 
+  WarningOutlined, ArrowLeftOutlined, CheckCircleOutlined,
+  DashboardOutlined, InfoCircleOutlined
+} from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-hot-toast';
+import { getCajaActual, cerrarCaja } from '../../api/caja.api';
+import { formatCurrency } from '../../utils/formatters';
+import { useCajaStore } from '../../store/cajaStore';
+
+const { Title, Text } = Typography;
+
+export default function ArqueoPage() {
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [closing, setClosing] = useState(false);
+  const [stats, setStats] = useState(null);
+  const [billetajeNIO, setBilletajeNIO] = useState([]);
+  const [billetajeUSD, setBilletajeUSD] = useState([]);
+  const [tipoCambio, setTipoCambio] = useState(36.6);
+  const [form] = Form.useForm();
+
+  const { cajaActual, setCajaActual, limpiarCaja } = useCajaStore();
+
+  const denominacionesNIO = [
+    { denominacion: 1000, tipo: 'billete' },
+    { denominacion: 500, tipo: 'billete' },
+    { denominacion: 200, tipo: 'billete' },
+    { denominacion: 100, tipo: 'billete' },
+    { denominacion: 50, tipo: 'billete' },
+    { denominacion: 20, tipo: 'billete' },
+    { denominacion: 10, tipo: 'billete' },
+    { denominacion: 5, tipo: 'moneda' },
+    { denominacion: 1, tipo: 'moneda' },
+    { denominacion: 0.50, tipo: 'moneda' },
+    { denominacion: 0.25, tipo: 'moneda' },
+    { denominacion: 0.10, tipo: 'moneda' }
+  ];
+
+  const denominacionesUSD = [
+    { denominacion: 100, tipo: 'billete' },
+    { denominacion: 50, tipo: 'billete' },
+    { denominacion: 20, tipo: 'billete' },
+    { denominacion: 10, tipo: 'billete' },
+    { denominacion: 5, tipo: 'billete' },
+    { denominacion: 1, tipo: 'billete' }
+  ];
+
+  useEffect(() => {
+    fetchCaja();
+  }, []);
+
+  const fetchCaja = async () => {
+    setLoading(true);
+    try {
+      const res = await getCajaActual();
+      if (res.data) {
+        setCajaActual(res.data.caja);
+        setStats(res.data.resumen);
+        setBilletajeNIO(denominacionesNIO.map(d => ({ ...d, cantidad: 0 })));
+        setBilletajeUSD(denominacionesUSD.map(d => ({ ...d, cantidad: 0 })));
+      } else {
+        toast.error('No hay una caja abierta');
+        navigate('/caja');
+      }
+    } catch (err) {
+      navigate('/caja');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateBilletajeNIO = (denominacion, cantidad) => {
+    setBilletajeNIO(prev => prev.map(b => b.denominacion === denominacion ? { ...b, cantidad: Number(cantidad) || 0 } : b));
+  };
+
+  const updateBilletajeUSD = (denominacion, cantidad) => {
+    setBilletajeUSD(prev => prev.map(b => b.denominacion === denominacion ? { ...b, cantidad: Number(cantidad) || 0 } : b));
+  };
+
+  const totalNIO = useMemo(() => billetajeNIO.reduce((s, b) => s + (Number(b.denominacion) * Number(b.cantidad)), 0), [billetajeNIO]);
+  const totalUSD = useMemo(() => billetajeUSD.reduce((s, b) => s + (Number(b.denominacion) * Number(b.cantidad)), 0), [billetajeUSD]);
+  
+  const totalUSDConvertido = useMemo(() => Number(totalUSD) * Number(tipoCambio), [totalUSD, tipoCambio]);
+  const totalConsolidado = useMemo(() => Number(totalNIO) + totalUSDConvertido, [totalNIO, totalUSDConvertido]);
+  const diferencia = useMemo(() => totalConsolidado - (stats?.saldoActual || 0), [totalConsolidado, stats]);
+
+  const handleFinalizarCierre = async () => {
+    if (closing) return;
+    setClosing(true);
+    try {
+      const bNIO = billetajeNIO
+        .filter(b => b.cantidad > 0)
+        .map(b => ({ 
+          denominacion: Number(b.denominacion), 
+          cantidad: Number(b.cantidad), 
+          subtotal: Number(b.denominacion * b.cantidad),
+          tipo: b.tipo,
+          moneda: 'NIO'
+        }));
+
+      const bUSD = billetajeUSD
+        .filter(b => b.cantidad > 0)
+        .map(b => ({ 
+          denominacion: Number(b.denominacion), 
+          cantidad: Number(b.cantidad), 
+          subtotal: Number(b.denominacion * b.cantidad),
+          tipo: b.tipo,
+          moneda: 'USD'
+        }));
+      
+      const payload = { 
+        billetaje: [...bNIO, ...bUSD],
+        tipoCambio: Number(tipoCambio),
+        observaciones: form.getFieldValue('observaciones') || ''
+      };
+
+      console.log('--- DEBUG PAYLOAD FRONTEND ---');
+      console.log(JSON.stringify(payload, null, 2));
+
+      await cerrarCaja(cajaActual._id, payload);
+      
+      limpiarCaja();
+      Modal.success({
+        title: '¡ARQUEO FINALIZADO!',
+        okText: 'Ir al Listado',
+        content: <Result status="success" title="Caja cerrada con éxito" />,
+        onOk: () => navigate('/caja')
+      });
+    } catch (err) {
+      toast.error(err.response?.data?.mensaje || 'Error al guardar arqueo');
+    } finally {
+      setClosing(false);
+    }
+  };
+
+  if (loading) return <div style={{ textAlign: 'center', padding: '100px' }}><Spin size="large" /></div>;
+
+  return (
+    <div style={{ maxWidth: 1300, margin: '0 auto', padding: '20px' }}>
+       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <Space>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/caja')}>Atrás</Button>
+          <Title level={3} style={{ margin: 0 }}>Cierre de Turno</Title>
+        </Space>
+      </div>
+
+      <Row gutter={[16, 16]}>
+        <Col span={24}>
+           <Card style={{ background: '#fafafa', border: '1px solid #d9d9d9' }}>
+             <Row gutter={16} align="middle">
+               <Col span={6}><Statistic title="Sistema (NIO)" value={stats?.saldoActual || 0} prefix="C$" /></Col>
+               <Col span={6}><Statistic title="Físico (Convo)" value={totalConsolidado} prefix="C$" valueStyle={{ color: '#1677ff', fontWeight: 'bold' }} /></Col>
+               <Col span={6}>
+                  <div style={{ padding: '10px', background: diferencia < 0 ? '#fff1f0' : '#f6ffed', borderRadius: 8, textAlign: 'center' }}>
+                    <Text type="secondary" style={{ fontSize: 11 }}>DIFERENCIA</Text>
+                    <Title level={4} style={{ margin: 0, color: diferencia < 0 ? '#f5222d' : '#52c41a' }}>
+                      {formatCurrency(diferencia)}
+                    </Title>
+                  </div>
+               </Col>
+               <Col span={6}>
+                 <Text strong style={{ fontSize: 12 }}>TASA DE CAMBIO</Text>
+                 <InputNumber 
+                   size="large" 
+                   value={tipoCambio} 
+                   onChange={setTipoCambio} 
+                   style={{ width: '100%', fontSize: 24, fontWeight: 'bold' }}
+                   precision={2}
+                   prefix="C$"
+                 />
+               </Col>
+             </Row>
+           </Card>
+        </Col>
+
+        <Col xs={24} lg={12}>
+          <Card title="Efectivo NIO">
+            <div style={{ height: '50vh', overflowY: 'auto' }}>
+              {denominacionesNIO.map(d => (
+                <div key={d.denominacion} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, padding: 8, background: '#f5f5f5', borderRadius: 8 }}>
+                  <Text strong>{d.denominacion >= 1 ? d.denominacion : `${(d.denominacion * 100).toFixed(0)}c`}</Text>
+                  <InputNumber 
+                    min={0} 
+                    value={billetajeNIO.find(b => b.denominacion === d.denominacion)?.cantidad || 0}
+                    onChange={v => updateBilletajeNIO(d.denominacion, v)}
+                  />
+                  <Text style={{ width: 100, textAlign: 'right' }}>{formatCurrency(d.denominacion * (billetajeNIO.find(b => b.denominacion === d.denominacion)?.cantidad || 0))}</Text>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </Col>
+
+        <Col xs={24} lg={12}>
+          <Card title="Efectivo USD">
+            <div style={{ height: '50vh', overflowY: 'auto' }}>
+              {denominacionesUSD.map(d => (
+                <div key={d.denominacion} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, padding: 8, background: '#f6ffed', borderRadius: 8 }}>
+                  <Text strong>${d.denominacion}</Text>
+                  <InputNumber 
+                    min={0} 
+                    value={billetajeUSD.find(b => b.denominacion === d.denominacion)?.cantidad || 0}
+                    onChange={v => updateBilletajeUSD(d.denominacion, v)}
+                  />
+                  <Text style={{ width: 100, textAlign: 'right' }}>${(d.denominacion * (billetajeUSD.find(b => b.denominacion === d.denominacion)?.cantidad || 0)).toFixed(2)}</Text>
+                </div>
+              ))}
+            </div>
+            <Divider />
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <Text strong>Subtotal USD:</Text>
+              <Text strong style={{ fontSize: 18, color: '#52c41a' }}>${totalUSD.toFixed(2)}</Text>
+            </div>
+            <Text type="secondary" style={{ fontSize: 11 }}>En Córdobas: {formatCurrency(totalUSDConvertido)}</Text>
+          </Card>
+        </Col>
+
+        <Col span={24}>
+          <Card>
+            <Form form={form} layout="vertical">
+              <Form.Item name="observaciones" label="Observaciones">
+                <Input.TextArea rows={2} />
+              </Form.Item>
+              <Button type="primary" size="large" block onClick={handleFinalizarCierre} loading={closing}>
+                GUARDAR CIERRE DE CAJA
+              </Button>
+            </Form>
+          </Card>
+        </Col>
+      </Row>
+    </div>
+  );
+}
