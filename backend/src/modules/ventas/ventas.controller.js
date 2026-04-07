@@ -187,6 +187,26 @@ const anularVenta = async (req, res) => {
       return res.status(400).json({ mensaje: 'La venta ya está anulada' });
     }
 
+    // Validaciones previas para no dejar el sistema inconsistente
+    let caja = null;
+    if (venta.cajaId) {
+      caja = await Caja.findById(venta.cajaId);
+      if (caja && caja.estado === 'cerrada') {
+        return res.status(400).json({ mensaje: 'No se puede anular una venta de una caja cerrada' });
+      }
+    }
+
+    let credito = null;
+    if (venta.metodoPago === 'credito') {
+      credito = await Credito.findOne({ ventaId: venta._id });
+      const abonosCount = credito?.abonos?.length || 0;
+      if (abonosCount > 0) {
+        return res.status(400).json({
+          mensaje: 'No se puede anular una venta al crédito que ya tiene abonos. Revierta/ajuste el crédito primero.',
+        });
+      }
+    }
+
     venta.estado = 'anulada';
     venta.motivoAnulacion = motivo || 'Sin motivo especificado';
     await venta.save();
@@ -209,6 +229,35 @@ const anularVenta = async (req, res) => {
           usuarioId: req.user._id,
         });
       }
+    }
+
+    // Reverso contable
+    if (venta.metodoPago === 'credito') {
+      // Anular crédito y restaurar saldo del cliente
+      if (credito) {
+        credito.estado = 'anulado';
+        const notaExtra = `Anulado por: ${req.user?._id || 'sistema'} | Motivo: ${venta.motivoAnulacion}`;
+        credito.notas = credito.notas ? `${credito.notas}\n${notaExtra}` : notaExtra;
+        await credito.save();
+      }
+
+      if (venta.clienteId) {
+        const clienteDoc = await Cliente.findById(venta.clienteId);
+        if (clienteDoc) {
+          const nuevoSaldo = (Number(clienteDoc.saldoActual) || 0) - (Number(venta.total) || 0);
+          clienteDoc.saldoActual = Math.max(0, nuevoSaldo);
+          await clienteDoc.save();
+        }
+      }
+    } else if (caja) {
+      // Crear un egreso de reverso en la caja abierta (mantiene auditoría)
+      caja.egresos.push({
+        concepto: `Anulación venta ${venta.numeroVenta}`,
+        monto: venta.total,
+        tipo: 'egreso',
+        ventaId: venta._id,
+      });
+      await caja.save();
     }
 
     res.json({ mensaje: 'Venta anulada correctamente', venta });

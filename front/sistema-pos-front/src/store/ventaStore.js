@@ -105,6 +105,13 @@ export const useVentaStore = create((set, get) => ({
     set({ pestanas: nuevas });
   },
 
+  setProductosEnPestana: (productos) => {
+    const { pestanas, pestanaActiva } = get();
+    const safeProductos = Array.isArray(productos) ? productos : [];
+    const nuevas = pestanas.map((p) => (p.id === pestanaActiva ? { ...p, productos: safeProductos } : p));
+    set({ pestanas: nuevas });
+  },
+
   limpiarPestana: () => {
     const { pestanas, pestanaActiva } = get();
     const nuevas = pestanas.map((p) =>

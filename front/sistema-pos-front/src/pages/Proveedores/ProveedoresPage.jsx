@@ -12,7 +12,7 @@ import {
 import { toast } from 'react-hot-toast';
 import { 
   getProveedores, createProveedor, updateProveedor, deleteProveedor, 
-  getComprasProveedor, registrarCompra 
+  getComprasProveedor, registrarCompra, updateCompra, deleteCompra 
 } from '../../api/proveedores.api';
 import { getProductos } from '../../api/inventario.api';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
@@ -27,9 +27,16 @@ export default function ProveedoresPage() {
   const [productos, setProductos] = useState([]);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isModalCompraVisible, setIsModalCompraVisible] = useState(false);
+  const [isModalComprasVisible, setIsModalComprasVisible] = useState(false);
+  const [isModalEditarCompraVisible, setIsModalEditarCompraVisible] = useState(false);
+  const [loadingCompras, setLoadingCompras] = useState(false);
+  const [comprasProveedor, setComprasProveedor] = useState([]);
+  const [selectedProveedor, setSelectedProveedor] = useState(null);
+  const [editingCompra, setEditingCompra] = useState(null);
   const [editingProveedor, setEditingProveedor] = useState(null);
   const [form] = Form.useForm();
   const [formCompra] = Form.useForm();
+  const [formEditarCompra] = Form.useForm();
   const { isAdmin } = useAuthStore();
 
   // Carrito de compra a proveedor local state
@@ -122,6 +129,74 @@ export default function ProveedoresPage() {
 
   const totalCompra = compraItems.reduce((s, i) => s + i.subtotal, 0);
 
+  const fetchCompras = async (proveedorId) => {
+    setLoadingCompras(true);
+    try {
+      const res = await getComprasProveedor(proveedorId);
+      setComprasProveedor(res.data);
+    } catch (err) {
+      toast.error('Error al cargar compras del proveedor');
+    } finally {
+      setLoadingCompras(false);
+    }
+  };
+
+  const openComprasProveedor = async (proveedor) => {
+    setSelectedProveedor(proveedor);
+    setIsModalComprasVisible(true);
+    await fetchCompras(proveedor._id);
+  };
+
+  const openEditarCompra = (compra) => {
+    setEditingCompra(compra);
+    setCompraItems(
+      (compra.productos || []).map((p) => ({
+        productoId: p.productoId,
+        nombre: p.nombre,
+        cantidad: p.cantidad,
+        precioCompra: p.precioUnitario,
+        subtotal: p.subtotal,
+      }))
+    );
+    formEditarCompra.setFieldsValue({
+      numeroFactura: compra.numeroFactura,
+      observaciones: compra.observaciones,
+    });
+    setIsModalEditarCompraVisible(true);
+  };
+
+  const onGuardarEdicionCompra = async (values) => {
+    if (!editingCompra) return;
+    if (compraItems.length === 0) {
+      toast.error('Debe agregar productos a la compra');
+      return;
+    }
+    try {
+      await updateCompra(editingCompra._id, {
+        ...values,
+        productos: compraItems,
+      });
+      toast.success('Compra corregida e inventario recalculado');
+      setIsModalEditarCompraVisible(false);
+      setEditingCompra(null);
+      setCompraItems([]);
+      formEditarCompra.resetFields();
+      if (selectedProveedor?._id) await fetchCompras(selectedProveedor._id);
+    } catch (err) {
+      toast.error(err.response?.data?.mensaje || 'Error al actualizar compra');
+    }
+  };
+
+  const onAnularCompra = async (compraId) => {
+    try {
+      await deleteCompra(compraId);
+      toast.success('Compra anulada y stock revertido');
+      if (selectedProveedor?._id) await fetchCompras(selectedProveedor._id);
+    } catch (err) {
+      toast.error(err.response?.data?.mensaje || 'Error al anular compra');
+    }
+  };
+
   const onRegistrarCompra = async (values) => {
     if (compraItems.length === 0) {
         toast.error('Debe agregar productos a la compra');
@@ -174,6 +249,7 @@ export default function ProveedoresPage() {
       render: (_, record) => (
         <Space>
           <Button icon={<EditOutlined />} size="small" onClick={() => handleOpenModal(record)} />
+          <Button icon={<ShoppingCartOutlined />} size="small" onClick={() => openComprasProveedor(record)} />
           {isAdmin() && (
             <Popconfirm title="¿Desactivar proveedor?" onConfirm={() => handleDelete(record._id)}>
               <Button icon={<DeleteOutlined />} size="small" danger ghost />
@@ -355,6 +431,165 @@ export default function ProveedoresPage() {
           </div>
           
           <Form.Item name="observaciones" label="Notas de la compra" style={{ marginTop: 20 }}>
+            <Input.TextArea rows={2} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Modal Historial de Compras */}
+      <Modal
+        title={selectedProveedor ? `Compras: ${selectedProveedor.nombre}` : 'Compras'}
+        open={isModalComprasVisible}
+        onCancel={() => { setIsModalComprasVisible(false); setComprasProveedor([]); setSelectedProveedor(null); }}
+        footer={null}
+        width={900}
+      >
+        <Table
+          size="small"
+          rowKey="_id"
+          loading={loadingCompras}
+          dataSource={comprasProveedor}
+          pagination={{ pageSize: 10 }}
+          columns={[
+            { title: 'Fecha', dataIndex: 'fecha', render: (v) => formatDateTime(v) },
+            { title: 'Factura', dataIndex: 'numeroFactura', render: (v) => v || '—' },
+            { title: 'Total', dataIndex: 'total', align: 'right', render: (v) => formatCurrency(v) },
+            { title: 'Usuario', dataIndex: 'usuarioId', render: (u) => u?.nombre || '—' },
+            {
+              title: 'Acciones',
+              align: 'right',
+              render: (_, record) => (
+                <Space>
+                  {isAdmin() && (
+                    <>
+                      <Button
+                        size="small"
+                        icon={<EditOutlined />}
+                        onClick={() => {
+                          setIsModalComprasVisible(false);
+                          openEditarCompra(record);
+                        }}
+                      >
+                        Editar
+                      </Button>
+                      <Popconfirm
+                        title="¿Anular esta compra? Esto revertirá stock."
+                        onConfirm={() => onAnularCompra(record._id)}
+                      >
+                        <Button size="small" danger icon={<DeleteOutlined />}>Anular</Button>
+                      </Popconfirm>
+                    </>
+                  )}
+                </Space>
+              ),
+            },
+          ]}
+        />
+      </Modal>
+
+      {/* Modal Editar Compra */}
+      <Modal
+        title={editingCompra ? `Editar Compra (${editingCompra.numeroFactura || 'S/F'})` : 'Editar Compra'}
+        open={isModalEditarCompraVisible}
+        onCancel={() => { setIsModalEditarCompraVisible(false); setEditingCompra(null); setCompraItems([]); formEditarCompra.resetFields(); }}
+        onOk={() => formEditarCompra.submit()}
+        width={800}
+        okText="Guardar Corrección"
+      >
+        <Form form={formEditarCompra} layout="vertical" onFinish={onGuardarEdicionCompra}>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="numeroFactura" label="Número de Factura / Ticket">
+                <Input placeholder="Ej: FAC-001-2024" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Alert
+                type="info"
+                showIcon
+                message="La corrección ajusta stock por diferencia y registra Kardex."
+              />
+            </Col>
+          </Row>
+
+          <Divider orientation="left">Productos</Divider>
+
+          <div style={{ marginBottom: 15 }}>
+            <Select
+              showSearch
+              placeholder="Buscar producto y agregar a la compra..."
+              style={{ width: '100%' }}
+              onSelect={onAgregarItemCompra}
+              value={null}
+            >
+              {productos.map((p) => (
+                <Option key={p._id} value={p._id}>
+                  {p.nombre} ({p.codigo || 'S/C'}) - Stock: {p.stock}
+                </Option>
+              ))}
+            </Select>
+          </div>
+
+          <div style={{ background: '#fafafa', borderRadius: 8, padding: 10, minHeight: 150 }}>
+            {compraItems.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 40, color: '#bfbfbf' }}>
+                <ShoppingCartOutlined style={{ fontSize: 32 }} />
+                <p>Lista de compra vacía</p>
+              </div>
+            ) : (
+              <Table
+                size="small"
+                dataSource={compraItems}
+                rowKey="productoId"
+                pagination={false}
+                columns={[
+                  { title: 'Producto', dataIndex: 'nombre' },
+                  {
+                    title: 'Cantidad',
+                    render: (_, record) => (
+                      <InputNumber
+                        min={1}
+                        value={record.cantidad}
+                        onChange={(v) => handleUpdateItemCompra(record.productoId, 'cantidad', v)}
+                      />
+                    ),
+                  },
+                  {
+                    title: 'Costo Unit.',
+                    render: (_, record) => (
+                      <InputNumber
+                        min={0}
+                        value={record.precioCompra}
+                        onChange={(v) => handleUpdateItemCompra(record.productoId, 'precioCompra', v)}
+                        formatter={(val) => `C$ ${val}`}
+                      />
+                    ),
+                  },
+                  { title: 'Subtotal', dataIndex: 'subtotal', align: 'right', render: (v) => formatCurrency(v) },
+                  {
+                    title: '',
+                    render: (_, r) => (
+                      <Button
+                        type="text"
+                        danger
+                        icon={<DeleteOutlined />}
+                        onClick={() => setCompraItems((prev) => prev.filter((x) => x.productoId !== r.productoId))}
+                      />
+                    ),
+                  },
+                ]}
+                footer={() => (
+                  <div style={{ textAlign: 'right', paddingRight: 50 }}>
+                    <Title level={4} style={{ margin: 0 }}>
+                      Total Compra: {formatCurrency(totalCompra)}
+                    </Title>
+                  </div>
+                )}
+              />
+            )}
+          </div>
+
+          <Form.Item name="observaciones" label="Notas" style={{ marginTop: 20 }}>
             <Input.TextArea rows={2} />
           </Form.Item>
         </Form>

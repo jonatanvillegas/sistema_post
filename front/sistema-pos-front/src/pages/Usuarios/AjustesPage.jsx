@@ -1,20 +1,25 @@
 import React, { useState } from 'react';
-import { Card, Typography, Button, Space, Divider, Alert, message, List, Tag, Row, Col } from 'antd';
+import { Card, Typography, Button, Space, Divider, Alert, message, List, Tag, Row, Col, Form, Select, Switch, Input, InputNumber } from 'antd';
 import { 
   CloudDownloadOutlined, 
   SafetyCertificateOutlined, 
   HistoryOutlined, 
   CheckCircleOutlined,
   FileZipOutlined,
-  DesktopOutlined
+  DesktopOutlined,
+  PrinterOutlined
 } from '@ant-design/icons';
 import { crearBackup } from '../../api/admin.api';
+import { getPrintSettings, setPrintSettings } from '../../utils/printSettings';
 
 const { Title, Text, Paragraph } = Typography;
 
 export default function AjustesPage() {
   const [loading, setLoading] = useState(false);
   const [lastBackup, setLastBackup] = useState(null);
+  const [formPrint] = Form.useForm();
+
+  const initialPrint = getPrintSettings();
 
   const handleBackup = async () => {
     setLoading(true);
@@ -119,6 +124,67 @@ export default function AjustesPage() {
               </div>
             </Col>
           </Row>
+        </Card>
+
+        {/* Sección de Impresión */}
+        <Card
+          title={<Space><PrinterOutlined /> Impresión</Space>}
+          className="dashboard-card"
+        >
+          <Alert
+            type="info"
+            showIcon
+            message="Configura el tamaño del papel para recibos"
+            description="Si no estás seguro, empieza con 58mm. Puedes cambiarlo en cualquier momento."
+            style={{ marginBottom: 16, borderRadius: 12 }}
+          />
+
+          <Form
+            form={formPrint}
+            layout="vertical"
+            initialValues={initialPrint}
+            onValuesChange={(_, all) => {
+              try {
+                setPrintSettings(all);
+              } catch {
+                // noop
+              }
+            }}
+          >
+            <Row gutter={[16, 16]}>
+              <Col xs={24} md={8}>
+                <Form.Item name="paperWidthMm" label="Ancho de papel">
+                  <Select>
+                    <Select.Option value={58}>58 mm</Select.Option>
+                    <Select.Option value={80}>80 mm</Select.Option>
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={8}>
+                <Form.Item name="copies" label="Copias">
+                  <InputNumber min={1} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={8}>
+                <Form.Item
+                  name="silent"
+                  label="Impresión silenciosa"
+                  valuePropName="checked"
+                >
+                  <Switch />
+                </Form.Item>
+              </Col>
+              <Col xs={24}>
+                <Form.Item
+                  name="deviceName"
+                  label="Impresora por defecto (opcional)"
+                  extra="Si está vacío, se abrirá el diálogo para elegir impresora."
+                >
+                  <Input placeholder="Ej: EPSON TM-T20II" />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Form>
         </Card>
 
         {/* Otras configuraciones (Placeholders para futuro) */}

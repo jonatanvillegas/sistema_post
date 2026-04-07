@@ -1,0 +1,51 @@
+{
+  "name": "sistema-pos-escritorio",
+  "version": "1.0.0",
+  "description": "Sistema POS Moderno",
+  "main": "main.js",
+  "author": "Jonatan Villegas",
+  "scripts": {
+    "start": "electron .",
+    "dist": "npm --prefix front/sistema-pos-front run build && electron-builder",
+    "postinstall": "cd backend && npm install && cd ../front/sistema-pos-front && npm install"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.x",
+    "morgan": "^1.10.0"
+  },
+  "devDependencies": {
+    "electron": "^28.3.3",
+    "electron-builder": "^24.13.3",
+    "electron-packager": "^17.1.2"
+  },
+  "build": {
+    "appId": "com.sistema.pos",
+    "productName": "Sistema POS",
+    "win": {
+      "target": "portable",
+      "signAndEditExecutable": false,
+      "forceCodeSigning": false,
+      "verifyUpdateCodeSignature": false,
+      "cscLink": null,
+      "cscKeyPassword": null
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "backend/**/*",
+      "front/sistema-pos-front/dist/**/*"
+    ],
+    "directories": {
+      "output": "dist-electron"
+    }
+  }
+}

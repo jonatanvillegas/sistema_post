@@ -22,6 +22,7 @@ const theme = {
 };
 
 export default function App() {
+  console.log('📦 Componente App montado');
   return (
     <ConfigProvider theme={theme} locale={esES}>
       <Toaster

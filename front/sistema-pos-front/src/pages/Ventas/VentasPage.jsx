@@ -12,13 +12,15 @@ import {
 } from '@ant-design/icons';
 import { toast } from 'react-hot-toast';
 import { getProductos } from '../../api/inventario.api';
-import { createVenta } from '../../api/ventas.api';
+import { createVenta, getVentas, anularVenta } from '../../api/ventas.api';
 import { getCajaActual } from '../../api/caja.api';
 import { getClientes } from '../../api/clientes.api';
 import { useVentaStore } from '../../store/ventaStore';
 import { useCajaStore } from '../../store/cajaStore';
 import { useAuthStore } from '../../store/authStore';
 import { formatCurrency } from '../../utils/formatters';
+import { buildReceiptHtml } from '../../utils/receipt';
+import { getPrintSettings } from '../../utils/printSettings';
 
 const { Title, Text, Paragraph } = Typography;
 const { Option } = Select;
@@ -26,10 +28,15 @@ const { Option } = Select;
 export default function VentasPage() {
   const [loading, setLoading] = useState(false);
   const [productos, setProductos] = useState([]);
+  const [catalogoProductos, setCatalogoProductos] = useState([]);
   const [busqueda, setBusqueda] = useState('');
   const [isModalPagoVisible, setIsModalPagoVisible] = useState(false);
   const [montoRecibido, setMontoRecibido] = useState(0);
   const [metodoPago, setMetodoPago] = useState('efectivo');
+
+  const [isVentasModalVisible, setIsVentasModalVisible] = useState(false);
+  const [ventasRecientesLoading, setVentasRecientesLoading] = useState(false);
+  const [ventasRecientes, setVentasRecientes] = useState([]);
 
   // Buscador de Clientes
   const [clientesBusqueda, setClientesBusqueda] = useState([]);
@@ -38,11 +45,104 @@ export default function VentasPage() {
   const { 
     pestanas, pestanaActiva, agregarPestana, cerrarPestana, setPestanaActiva,
     agregarProducto, quitarProducto, cambiarCantidad, getPestanaActiva, 
-    getTotal, getSubtotal, limpiarPestana, setCliente
+    getTotal, getSubtotal, limpiarPestana, setCliente, setDescuento, setProductosEnPestana
   } = useVentaStore();
   
   const { cajaActual } = useCajaStore();
+  const isAdmin = useAuthStore((s) => s.isAdmin);
   const searchInputRef = useRef(null);
+
+  const cargarCatalogoProductos = async () => {
+    try {
+      const res = await getProductos({ buscar: '', limit: 5000 });
+      const list = Array.isArray(res.data) ? res.data : [];
+      setCatalogoProductos(list);
+      return list;
+    } catch (err) {
+      toast.error(err?.response?.data?.mensaje || 'Error cargando catálogo de productos');
+      return [];
+    }
+  };
+
+  const openVentasRecientes = async () => {
+    setIsVentasModalVisible(true);
+    setVentasRecientesLoading(true);
+    try {
+      const { data } = await getVentas({ page: 1, limit: 50 });
+      setVentasRecientes(Array.isArray(data?.ventas) ? data.ventas : []);
+    } catch (err) {
+      toast.error(err?.response?.data?.mensaje || 'Error cargando ventas');
+    } finally {
+      setVentasRecientesLoading(false);
+    }
+  };
+
+  const corregirVenta = async (venta) => {
+    if (!venta?._id) return;
+    if (!isAdmin()) {
+      toast.error('Solo un administrador puede corregir/anular ventas');
+      return;
+    }
+    if (venta.estado === 'anulada') {
+      toast.error('Esa venta ya está anulada');
+      return;
+    }
+
+    let motivoValue = '';
+    Modal.confirm({
+      title: `Corregir venta ${venta.numeroVenta}`,
+      content: (
+        <div>
+          <Paragraph style={{ marginBottom: 8 }}>
+            Se anulará la venta y se cargará en el carrito para volver a facturar con cambios.
+          </Paragraph>
+          <Input placeholder="Motivo (obligatorio)" onChange={(e) => (motivoValue = e.target.value)} />
+        </div>
+      ),
+      okText: 'Anular y cargar',
+      okButtonProps: { danger: true },
+      cancelText: 'Cancelar',
+      onOk: async () => {
+        if (!motivoValue || !motivoValue.trim()) {
+          toast.error('Debe ingresar un motivo');
+          throw new Error('Motivo requerido');
+        }
+
+        await anularVenta(venta._id, { motivo: motivoValue.trim() });
+
+        const catalogo = await cargarCatalogoProductos();
+        const items = Array.isArray(venta?.productos) ? venta.productos : [];
+
+        limpiarPestana();
+        setCliente({
+          nombre: venta?.cliente?.nombre || 'Consumidor Final',
+          nit: venta?.cliente?.nit || 'CF',
+          _id: venta?.clienteId || null,
+        });
+        setDescuento(Number(venta?.descuento) || 0);
+
+        const productosCarrito = items.map((it) => {
+          const p = catalogo.find((x) => String(x._id) === String(it.productoId));
+          const stockDisponible = p?.stock ?? 0;
+          const cantidad = Number(it.cantidad) || 1;
+          const precioUnitario = Number(it.precioUnitario) || 0;
+          return {
+            productoId: it.productoId,
+            nombre: it.nombre,
+            codigo: it.codigo || '',
+            cantidad,
+            precioUnitario,
+            subtotal: cantidad * precioUnitario,
+            stockDisponible,
+          };
+        });
+
+        setProductosEnPestana(productosCarrito);
+        setIsVentasModalVisible(false);
+        toast.success('Venta anulada y cargada en el carrito');
+      },
+    });
+  };
 
   const currentTab = useMemo(() => getPestanaActiva(), [pestanas, pestanaActiva]);
   const totalActivo = useMemo(() => getTotal(), [pestanas, pestanaActiva]);
@@ -211,8 +311,47 @@ export default function VentasPage() {
         montoRecibido: metodoPago === 'efectivo' ? montoRecibido : (metodoPago === 'credito' ? 0 : totalActivo)
       };
 
-      await createVenta(payload);
+      const res = await createVenta(payload);
+      const ventaCreada = res.data;
       toast.success('¡Venta realizada con éxito!');
+
+      Modal.confirm({
+        title: 'Venta realizada',
+        icon: <PrinterOutlined />,
+        content: '¿Desea imprimir el recibo?',
+        okText: 'Imprimir',
+        cancelText: 'No',
+        onOk: async () => {
+          try {
+            const settings = getPrintSettings();
+            const html = buildReceiptHtml(ventaCreada, {
+              widthMm: settings.paperWidthMm || 58,
+              storeName: 'Sistema POS',
+            });
+            if (window?.electronAPI?.printReceipt) {
+              const r = await window.electronAPI.printReceipt(html, {
+                silent: Boolean(settings.silent),
+                deviceName: settings.deviceName || undefined,
+                copies: settings.copies || 1,
+                printBackground: true,
+              });
+              if (r && r.ok === false) throw new Error(r.error || 'No se pudo imprimir');
+            } else {
+              const w = window.open('', '_blank');
+              if (!w) throw new Error('Ventana de impresión bloqueada');
+              w.document.open();
+              w.document.write(html);
+              w.document.close();
+              w.focus();
+              w.print();
+              w.close();
+            }
+          } catch (err) {
+            toast.error(err?.message || 'Error al imprimir');
+          }
+        },
+      });
+
       limpiarPestana();
       setIsModalPagoVisible(false);
       setTimeout(() => searchInputRef.current?.focus(), 100);
@@ -357,9 +496,14 @@ export default function VentasPage() {
           <div className="carrito-header">
              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                 <Title level={4} style={{ margin: 0 }}>Carrito</Title>
-                <Button size="small" type="text" onClick={limpiarPestana} danger disabled={currentTab?.productos.length === 0}>
-                  <DeleteOutlined /> Vaciar
-                </Button>
+                <Space>
+                  <Button size="small" onClick={openVentasRecientes}>
+                    Ventas
+                  </Button>
+                  <Button size="small" type="text" onClick={limpiarPestana} danger disabled={currentTab?.productos.length === 0}>
+                    <DeleteOutlined /> Vaciar
+                  </Button>
+                </Space>
               </div>
               {/* SELECT DE CLIENTE */}
               <Select
@@ -422,6 +566,87 @@ export default function VentasPage() {
           </div>
         </div>
       </div>
+
+      <Modal
+        title="Ventas recientes"
+        open={isVentasModalVisible}
+        onCancel={() => setIsVentasModalVisible(false)}
+        footer={null}
+        width={900}
+        destroyOnClose
+      >
+        <Table
+          rowKey="_id"
+          loading={ventasRecientesLoading}
+          dataSource={ventasRecientes}
+          pagination={false}
+          size="middle"
+          columns={[
+            {
+              title: 'Venta',
+              dataIndex: 'numeroVenta',
+              key: 'numeroVenta',
+              render: (v) => <Text strong>{v}</Text>,
+            },
+            {
+              title: 'Fecha',
+              dataIndex: 'fecha',
+              key: 'fecha',
+              render: (v) => <Text>{v ? new Date(v).toLocaleString() : '-'}</Text>,
+            },
+            {
+              title: 'Cliente',
+              dataIndex: ['cliente', 'nombre'],
+              key: 'cliente',
+              render: (_v, r) => <Text>{r?.cliente?.nombre || 'Consumidor Final'}</Text>,
+            },
+            {
+              title: 'Pago',
+              dataIndex: 'metodoPago',
+              key: 'metodoPago',
+              render: (v) => <Tag>{String(v || '').toUpperCase()}</Tag>,
+            },
+            {
+              title: 'Total',
+              dataIndex: 'total',
+              key: 'total',
+              align: 'right',
+              render: (v) => <Text strong>{formatCurrency(Number(v) || 0)}</Text>,
+            },
+            {
+              title: 'Estado',
+              dataIndex: 'estado',
+              key: 'estado',
+              render: (v) => (
+                <Tag color={v === 'anulada' ? 'red' : 'green'}>{v === 'anulada' ? 'ANULADA' : 'COMPLETADA'}</Tag>
+              ),
+            },
+            {
+              title: '',
+              key: 'actions',
+              align: 'right',
+              render: (_v, r) => (
+                <Button
+                  size="small"
+                  danger
+                  disabled={!isAdmin() || r?.estado === 'anulada'}
+                  onClick={() => corregirVenta(r)}
+                >
+                  Corregir
+                </Button>
+              ),
+            },
+          ]}
+        />
+        {!isAdmin() && (
+          <Alert
+            style={{ marginTop: 12 }}
+            type="info"
+            message="Solo un administrador puede corregir/anular ventas."
+            showIcon
+          />
+        )}
+      </Modal>
 
       <Modal
         title={<Title level={3} style={{ margin: 0, textAlign: 'center' }}>Finalizar Venta</Title>}

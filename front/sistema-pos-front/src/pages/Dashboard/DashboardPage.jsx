@@ -136,8 +136,8 @@ export default function DashboardPage() {
             extra={<Text type="secondary">Cordobas (C$)</Text>} 
             className="dashboard-card"
           >
-            <div style={{ height: 350 }}>
-              <ResponsiveContainer width="100%" height="100%">
+            <div style={{ height: 350, minHeight: 350, minWidth: 0 }}>
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={350}>
                 <AreaChart data={ventasStats?.ventasPorDia}>
                   <defs>
                     <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
@@ -160,8 +160,8 @@ export default function DashboardPage() {
         </Col>
         <Col xs={24} lg={8}>
           <Card title={<Space><DollarOutlined /> Métodos de Pago</Space>} className="dashboard-card">
-            <div style={{ height: 350 }}>
-              <ResponsiveContainer width="100%" height="100%">
+            <div style={{ height: 350, minHeight: 350, minWidth: 0 }}>
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={350}>
                 <BarChart data={ventasStats?.ventasPorMetodo} layout="vertical">
                   <XAxis type="number" hide />
                   <YAxis 

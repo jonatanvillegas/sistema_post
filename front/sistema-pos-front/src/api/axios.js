@@ -3,7 +3,8 @@ import { useAuthStore } from '../store/authStore';
 
 const api = axios.create({
   // En Electron o producción se puede usar la URL completa, en dev se usa el proxy /api
-  baseURL: import.meta.env.VITE_API_URL || '/api',
+  // En Electron o producción usamos la URL absoluta (ajustada para localhost:5000)
+  baseURL: import.meta.env.PROD ? 'http://localhost:5000/api' : '/api',
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -22,7 +23,7 @@ api.interceptors.response.use(
   (err) => {
     if (err.response?.status === 401) {
       useAuthStore.getState().logout();
-      window.location.href = '/login';
+      window.location.hash = '#/login';
     }
     return Promise.reject(err);
   }
