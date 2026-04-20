@@ -62,8 +62,9 @@ const abrirCaja = async (req, res) => {
 // @PUT /api/caja/cerrar/:id
 const cerrarCaja = async (req, res) => {
   try {
-    const { billetaje = [], observaciones, tipoCambio: tipoCambioInput } = req.body;
+    const { billetaje = [], observaciones, tipoCambio: tipoCambioInput, depositoTransferencia: depositoTransferenciaInput } = req.body;
     const tipoCambio = Number(tipoCambioInput) || 36.6;
+    const depositoTransferencia = Number(depositoTransferenciaInput || 0);
 
     if (!Array.isArray(billetaje)) {
       return res.status(400).json({ mensaje: 'Billetaje inválido: se espera un arreglo' });
@@ -71,6 +72,10 @@ const cerrarCaja = async (req, res) => {
 
     if (!Number.isFinite(tipoCambio) || tipoCambio <= 0) {
       return res.status(400).json({ mensaje: 'Tipo de cambio inválido' });
+    }
+
+    if (!Number.isFinite(depositoTransferencia) || depositoTransferencia < 0) {
+      return res.status(400).json({ mensaje: 'Depósito/transferencia inválido' });
     }
 
     console.log('--- PAYLOAD RECIBIDO ---');
@@ -92,12 +97,15 @@ const cerrarCaja = async (req, res) => {
     const totalEgresosCents = (caja.egresos || [])
       .reduce((sum, e) => sum + toCents(e.monto), 0);
 
+    const depositoTransferenciaCents = toCents(depositoTransferencia);
+    const totalEgresosAjustadoCents = totalEgresosCents + depositoTransferenciaCents;
+
     const montoInicialCents = toCents(caja.montoInicial);
-    const montoFinalSistemaCents = montoInicialCents + totalVentasCents + totalIngresosCents - totalEgresosCents;
+    const montoFinalSistemaCents = montoInicialCents + totalVentasCents + totalIngresosCents - totalEgresosAjustadoCents;
     const montoFinalSistema = fromCents(montoFinalSistemaCents);
     const totalVentas = fromCents(totalVentasCents);
     const totalIngresos = fromCents(totalIngresosCents);
-    const totalEgresos = fromCents(totalEgresosCents);
+    const totalEgresos = fromCents(totalEgresosAjustadoCents);
 
     // 2. Procesar Arqueo Físico (Consolidado en NIO) usando centavos
     let montoFisicoConsolidadoCents = 0;
@@ -143,6 +151,7 @@ const cerrarCaja = async (req, res) => {
     caja.totalVentas = totalVentas;
     caja.totalIngresos = totalIngresos;
     caja.totalEgresos = totalEgresos;
+    caja.depositoTransferencia = fromCents(depositoTransferenciaCents);
     caja.tipoCambio = tipoCambio;
     caja.montoFinal = montoFisicoConsolidado;
     const diferenciaCents = montoFinalSistemaCents < 0
@@ -171,6 +180,7 @@ const cerrarCaja = async (req, res) => {
         totalVentas,
         totalIngresos,
         totalEgresos,
+        depositoTransferencia: caja.depositoTransferencia,
         montoFinalSistema,
         montoFisico: montoFisicoConsolidado,
         diferencia: caja.diferencia,

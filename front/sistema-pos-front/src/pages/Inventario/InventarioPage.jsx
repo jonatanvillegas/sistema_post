@@ -16,9 +16,34 @@ import { getProveedores } from '../../api/proveedores.api';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 import StockBadge from '../../components/StockBadge';
 import { useAuthStore } from '../../store/authStore';
+import JsBarcode from 'jsbarcode';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
+
+const calcEan13CheckDigit = (base12) => {
+  const s = String(base12 || '').replace(/\D/g, '');
+  if (s.length !== 12) return null;
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    const digit = Number(s[i]);
+    if (!Number.isFinite(digit)) return null;
+    // posiciones 1..12 desde la izquierda
+    const pos = i + 1;
+    sum += pos % 2 === 0 ? digit * 3 : digit;
+  }
+  return (10 - (sum % 10)) % 10;
+};
+
+const generateEan13 = () => {
+  // Prefijo interno 2 + (timestamp 9 dígitos) + (random 2 dígitos) = 12 dígitos
+  const ts = String(Date.now() % 1_000_000_000).padStart(9, '0');
+  const rand = String(Math.floor(Math.random() * 100)).padStart(2, '0');
+  const base12 = `2${ts}${rand}`;
+  const check = calcEan13CheckDigit(base12);
+  if (check === null) return '';
+  return `${base12}${check}`;
+};
 
 export default function InventarioPage() {
   const [loading, setLoading] = useState(false);
@@ -32,18 +57,112 @@ export default function InventarioPage() {
   const [form] = Form.useForm();
   const { isAdmin } = useAuthStore();
 
-  const lastAutoPrecioCompraRef = useRef(null);
+  const isAutoUpdatingRef = useRef(false);
+  const barcodeCanvasRef = useRef(null);
+  const codigoValue = Form.useWatch('codigo', form);
+  const [barcodeError, setBarcodeError] = useState('');
+  const [barcodeAssistEnabled, setBarcodeAssistEnabled] = useState(false);
+
+  const round2 = (n) => Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100;
+  const round1 = (n) => Math.round((Number(n || 0) + Number.EPSILON) * 10) / 10;
+
+  const getBarcodeFormat = (raw) => {
+    const s = String(raw || '').trim();
+    if (!s) return null;
+    const digitsOnly = /^\d+$/.test(s);
+    if (digitsOnly && (s.length === 12 || s.length === 13)) return 'EAN13';
+    return 'CODE128';
+  };
+
+  const downloadBarcodePng = () => {
+    const canvas = barcodeCanvasRef.current;
+    const code = String(form.getFieldValue('codigo') || '').trim();
+    if (!canvas || !code) return;
+
+    try {
+      const dataUrl = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `barcode_${code}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (_e) {
+      toast.error('No se pudo descargar el código de barras');
+    }
+  };
+
+  useEffect(() => {
+    if (!isModalVisible) return;
+    if (!barcodeAssistEnabled) {
+      const canvas = barcodeCanvasRef.current;
+      const ctx = canvas?.getContext?.('2d');
+      if (ctx && canvas) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+      setBarcodeError('');
+      return;
+    }
+    const canvas = barcodeCanvasRef.current;
+    const code = String(codigoValue || '').trim();
+    if (!canvas) return;
+
+    // Limpiar canvas si no hay código
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    setBarcodeError('');
+    if (!code) return;
+
+    const format = getBarcodeFormat(code);
+    if (!format) return;
+
+    try {
+      JsBarcode(canvas, code, {
+        format,
+        displayValue: true,
+        margin: 8,
+        height: 60,
+        fontSize: 14,
+      });
+    } catch (_e) {
+      setBarcodeError('Código inválido para generar imagen');
+    }
+  }, [isModalVisible, barcodeAssistEnabled, codigoValue]);
+
+  const calcMargenFromCompraVenta = (precioCompra, precioVenta) => {
+    const pc = Number(precioCompra);
+    const pv = Number(precioVenta);
+    if (!isFinite(pc) || !isFinite(pv)) return null;
+    if (pv <= 0) return null;
+    // margen sobre precio de venta (utilidad bruta)
+    const m = ((pv - pc) / pv) * 100;
+    if (!isFinite(m)) return null;
+    return round1(m);
+  };
 
   const calcPrecioCompraFromVentaMargen = (precioVenta, margenPct) => {
     const pv = Number(precioVenta);
     const m = Number(margenPct);
     if (!isFinite(pv) || !isFinite(m)) return null;
     if (pv < 0) return null;
-    // margen sobre precio de venta (utilidad bruta): compra = venta * (1 - margen%)
+    // compra = venta * (1 - margen%)
     const pc = pv * (1 - (m / 100));
     if (!isFinite(pc) || pc < 0) return null;
-    // Redondear a 2 decimales
-    return Math.round(pc * 100) / 100;
+    return round2(pc);
+  };
+
+  const calcPrecioVentaFromCompraMargen = (precioCompra, margenPct) => {
+    const pc = Number(precioCompra);
+    const m = Number(margenPct);
+    if (!isFinite(pc) || !isFinite(m)) return null;
+    if (pc < 0) return null;
+    if (m >= 100) return null;
+    // venta = compra / (1 - margen%)
+    const pv = pc / (1 - (m / 100));
+    if (!isFinite(pv) || pv < 0) return null;
+    return round2(pv);
   };
 
   const fetchData = async () => {
@@ -55,7 +174,7 @@ export default function InventarioPage() {
       ]);
       setData(resProd.data);
       setProveedores(resProv.data);
-    } catch (err) {
+    } catch {
       toast.error('Error al cargar datos del inventario');
     } finally {
       setLoading(false);
@@ -130,6 +249,7 @@ export default function InventarioPage() {
 
   const handleOpenModal = (producto = null) => {
     setEditingProducto(producto);
+    setBarcodeAssistEnabled(false);
     if (producto) {
       form.setFieldsValue({
         ...producto,
@@ -149,6 +269,57 @@ export default function InventarioPage() {
       });
     }
     setIsModalVisible(true);
+  };
+
+  const handleFormValuesChange = (changedValues, allValues) => {
+    if (isAutoUpdatingRef.current) return;
+
+    const changedKeys = Object.keys(changedValues || {});
+    const changedKey = changedKeys[0];
+    if (!changedKey) return;
+    if (!['precioCompra', 'precioVenta', 'margenGanancia'].includes(changedKey)) return;
+
+    const { precioCompra, precioVenta, margenGanancia } = allValues;
+    const pc = Number(precioCompra);
+    const pv = Number(precioVenta);
+    const m = Number(margenGanancia);
+
+    const next = {};
+
+    // Cualquier 2 calculan el 3ro:
+    // - compra + venta -> margen
+    // - venta + margen -> compra
+    // - compra + margen -> venta
+    if (changedKey === 'margenGanancia') {
+      if (isFinite(pv) && pv > 0) {
+        const nextPc = calcPrecioCompraFromVentaMargen(pv, m);
+        if (nextPc !== null && isFinite(nextPc) && nextPc >= 0) next.precioCompra = nextPc;
+      } else if (isFinite(pc) && pc >= 0) {
+        const nextPv = calcPrecioVentaFromCompraMargen(pc, m);
+        if (nextPv !== null && isFinite(nextPv) && nextPv >= 0) next.precioVenta = nextPv;
+      }
+    } else if (changedKey === 'precioVenta') {
+      if (isFinite(pc) && isFinite(pv) && pv > 0) {
+        const nextM = calcMargenFromCompraVenta(pc, pv);
+        if (nextM !== null && isFinite(nextM)) next.margenGanancia = nextM;
+      } else if (isFinite(pv) && isFinite(m) && pv >= 0) {
+        const nextPc = calcPrecioCompraFromVentaMargen(pv, m);
+        if (nextPc !== null && isFinite(nextPc) && nextPc >= 0) next.precioCompra = nextPc;
+      }
+    } else if (changedKey === 'precioCompra') {
+      if (isFinite(pc) && isFinite(pv) && pv > 0) {
+        const nextM = calcMargenFromCompraVenta(pc, pv);
+        if (nextM !== null && isFinite(nextM)) next.margenGanancia = nextM;
+      } else if (isFinite(pc) && isFinite(m) && pc >= 0) {
+        const nextPv = calcPrecioVentaFromCompraMargen(pc, m);
+        if (nextPv !== null && isFinite(nextPv) && nextPv >= 0) next.precioVenta = nextPv;
+      }
+    }
+
+    if (Object.keys(next).length === 0) return;
+    isAutoUpdatingRef.current = true;
+    form.setFieldsValue(next);
+    isAutoUpdatingRef.current = false;
   };
 
   const onFinish = async (values) => {
@@ -174,7 +345,7 @@ export default function InventarioPage() {
       await deleteProducto(id);
       toast.success('Producto eliminado');
       fetchData();
-    } catch (err) {
+    } catch {
       toast.error('Error al eliminar producto');
     }
   };
@@ -185,7 +356,7 @@ export default function InventarioPage() {
       setKardexData(res.data);
       setEditingProducto(producto);
       setIsKardexVisible(true);
-    } catch (err) {
+    } catch {
       toast.error('Error al cargar historial del Kardex');
     }
   };
@@ -218,7 +389,13 @@ export default function InventarioPage() {
     {
       title: 'Margen (%)',
       render: (_, record) => {
-        const margen = ((record.precioVenta - record.precioCompra) / record.precioVenta) * 100;
+        const pv = Number(record.precioVenta);
+        const pc = Number(record.precioCompra);
+        if (!isFinite(pv) || pv <= 0 || !isFinite(pc)) {
+          return <Tag>—</Tag>;
+        }
+        const margen = ((pv - pc) / pv) * 100;
+        if (!isFinite(margen)) return <Tag>—</Tag>;
         return <Tag color={margen > 30 ? 'green' : 'blue'}>{margen.toFixed(1)}%</Tag>;
       },
       responsive: ['lg']
@@ -304,7 +481,7 @@ export default function InventarioPage() {
         width={700}
         okText={editingProducto ? 'Actualizar' : 'Crear'}
       >
-        <Form form={form} layout="vertical" onFinish={onFinish}>
+        <Form form={form} layout="vertical" onFinish={onFinish} onValuesChange={handleFormValuesChange}>
           <Row gutter={16}>
             <Col span={12}>
               <Form.Item name="nombre" label="Nombre del Producto" rules={[{ required: true }]}>
@@ -313,7 +490,11 @@ export default function InventarioPage() {
             </Col>
             <Col span={12}>
               <Form.Item name="codigo" label="Código de Barras">
-                <Input id="form_item_codigo" placeholder="Escanee o ingrese código" prefix={<BarcodeOutlined />} />
+                <Input
+                  id="form_item_codigo"
+                  placeholder="Escanee o ingrese código"
+                  prefix={<BarcodeOutlined />}
+                />
               </Form.Item>
             </Col>
             <Col span={8}>
@@ -323,7 +504,7 @@ export default function InventarioPage() {
                   min={0}
                   step={0.01}
                   formatter={val => `C$ ${val}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                  parser={val => val.replace(/\C\$\s?|(,*)/g, '')}
+                  parser={val => val.replace(/C\$\s?|(,*)/g, '')}
                 />
               </Form.Item>
             </Col>
@@ -334,7 +515,7 @@ export default function InventarioPage() {
                   min={0}
                   step={0.01}
                   formatter={val => `C$ ${val}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                  parser={val => val.replace(/\C\$\s?|(,*)/g, '')}
+                  parser={val => val.replace(/C\$\s?|(,*)/g, '')}
                 />
               </Form.Item>
             </Col>
@@ -342,44 +523,11 @@ export default function InventarioPage() {
               <Form.Item
                 name="margenGanancia"
                 label="Margen (%)"
-                tooltip="Calcula el Precio Compra usando: compra = venta * (1 - margen/100). Ej: venta 100, margen 30 => compra 70."
+                tooltip="Flexible: con cualquier 2 campos se calcula el 3ro (compra/venta/margen)."
               >
                 <InputNumber style={{ width: '100%' }} min={0} max={99.99} step={0.1} />
               </Form.Item>
             </Col>
-
-            <Form.Item noStyle shouldUpdate={(prev, cur) => (
-              prev.precioVenta !== cur.precioVenta ||
-              prev.margenGanancia !== cur.margenGanancia ||
-              prev.precioCompra !== cur.precioCompra
-            )}>
-              {({ getFieldValue, setFieldsValue }) => {
-                const pv = getFieldValue('precioVenta');
-                const margen = getFieldValue('margenGanancia');
-                const currentPc = getFieldValue('precioCompra');
-                const nextPc = calcPrecioCompraFromVentaMargen(pv, margen);
-
-                // Solo autocalcular si:
-                // - hay pv y margen
-                // - y el usuario no ha sobreescrito manualmente (precioCompra coincide con el último autocalculado, o está vacío/0)
-                if (nextPc !== null) {
-                  const lastAuto = lastAutoPrecioCompraRef.current;
-                  const currentNum = currentPc === undefined || currentPc === null || currentPc === '' ? null : Number(currentPc);
-
-                  const isEmptyOrZero = currentNum === null || !isFinite(currentNum) || currentNum === 0;
-                  const matchesLastAuto = lastAuto !== null && isFinite(currentNum) && Number(currentNum) === Number(lastAuto);
-
-                  if (isEmptyOrZero || matchesLastAuto) {
-                    if (currentNum !== nextPc) {
-                      lastAutoPrecioCompraRef.current = nextPc;
-                      setFieldsValue({ precioCompra: nextPc });
-                    }
-                  }
-                }
-
-                return null;
-              }}
-            </Form.Item>
             <Col span={8}>
               <Form.Item name="categoria" label="Categoría" initialValue="General">
                 <Select>
@@ -443,6 +591,59 @@ export default function InventarioPage() {
               <Form.Item name="descripcion" label="Descripción (Opcional)">
                 <Input.TextArea rows={2} />
               </Form.Item>
+            </Col>
+
+            <Col span={24}>
+              <Divider orientation="left" style={{ marginTop: 4 }}>Código de barras (opcional)</Divider>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                <Space size={10}>
+                  <Switch
+                    checked={barcodeAssistEnabled}
+                    onChange={(checked) => {
+                      setBarcodeAssistEnabled(checked);
+                      if (checked) {
+                        const current = String(form.getFieldValue('codigo') || '').trim();
+                        if (!current) form.setFieldsValue({ codigo: generateEan13() });
+                      }
+                    }}
+                    checkedChildren="Sí"
+                    unCheckedChildren="No"
+                  />
+                  <Text>Ayuda con código de barras</Text>
+                </Space>
+
+                {barcodeAssistEnabled && (
+                  <Space.Compact>
+                    <Button size="small" onClick={() => form.setFieldsValue({ codigo: generateEan13() })}>
+                      Generar
+                    </Button>
+                    <Button size="small" disabled={!String(form.getFieldValue('codigo') || '').trim()} onClick={downloadBarcodePng}>
+                      Descargar
+                    </Button>
+                  </Space.Compact>
+                )}
+              </div>
+
+              {barcodeAssistEnabled && (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ overflow: 'hidden' }}>
+                    <canvas
+                      ref={barcodeCanvasRef}
+                      style={{ maxWidth: '100%', background: '#fff', border: '1px dashed #d9d9d9', borderRadius: 8 }}
+                    />
+                  </div>
+                  {barcodeError && (
+                    <Text type="danger" style={{ fontSize: 12 }}>
+                      {barcodeError}
+                    </Text>
+                  )}
+                  {!barcodeError && String(form.getFieldValue('codigo') || '').trim() && (
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      Formato: {getBarcodeFormat(form.getFieldValue('codigo'))}
+                    </Text>
+                  )}
+                </div>
+              )}
             </Col>
           </Row>
         </Form>

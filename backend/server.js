@@ -17,7 +17,7 @@ const seedDatabase = async () => {
     const adminEmail = process.env.ADMIN_EMAIL || 'admin@admin.com';
     const adminPassword = process.env.ADMIN_PASSWORD || 'Test_123';
 
-    const adminExists = await User.findOne({ email: adminEmail });
+    const adminExists = await User.findOne({ email: 'admin@admin.com' });
     if (!adminExists) {
       await User.create({
         nombre: 'Admin Sistema',

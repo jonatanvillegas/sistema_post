@@ -17,7 +17,6 @@ import {
 } from '../../api/caja.api';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 import { useCajaStore } from '../../store/cajaStore';
-import { useAuthStore } from '../../store/authStore';
 
 const { Title, Text } = Typography;
 
@@ -53,7 +52,7 @@ export default function CajaPage() {
         limpiarCaja();
         setStats(null);
       }
-    } catch (err) {
+    } catch {
       limpiarCaja();
       setStats(null);
     }
@@ -68,7 +67,7 @@ export default function CajaPage() {
         hasta: filtrosHistorial.hasta ? filtrosHistorial.hasta.format('YYYY-MM-DD') : undefined
       });
       setHistorialData({ total: res.data.total, cajas: res.data.cajas });
-    } catch (err) {
+    } catch {
       toast.error('Error al cargar historial');
     } finally {
       setLoading(false);
@@ -330,6 +329,12 @@ export default function CajaPage() {
                     <Col span={6}><Statistic title="Tasa Cambio" value={selectedCajaHistorial.tipoCambio || 36.6} prefix="1$ =" precision={2} valueStyle={{ fontSize: 16 }} /></Col>
                     <Col span={6}><Statistic title="Diferencia" value={selectedCajaHistorial.diferencia} prefix="C$" valueStyle={{ color: selectedCajaHistorial.diferencia < 0 ? '#f5222d' : '#52c41a' }} /></Col>
                 </Row>
+                {Number(selectedCajaHistorial.depositoTransferencia || 0) > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <Text strong>Depósito / Transferencia:</Text>{' '}
+                    <Text>{formatCurrency(selectedCajaHistorial.depositoTransferencia)}</Text>
+                  </div>
+                )}
                 <Divider orientation="left">Desglose de Billetaje (Arqueo)</Divider>
                 <Row gutter={24}>
                     <Col span={12}>
@@ -401,7 +406,7 @@ export default function CajaPage() {
                style={{ width: '100%' }} 
                size="large" 
                formatter={val => `C$ ${val}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-               parser={val => val.replace(/\C\$\s?|(,*)/g, '')}
+               parser={val => val.replace(/C\$\s?|(,*)/g, '')}
              />
           </Form.Item>
         </Form>
@@ -420,7 +425,7 @@ export default function CajaPage() {
                style={{ width: '100%' }} 
                size="large" 
                formatter={val => `C$ ${val}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-               parser={val => val.replace(/\C\$\s?|(,*)/g, '')}
+               parser={val => val.replace(/C\$\s?|(,*)/g, '')}
              />
           </Form.Item>
           <Form.Item name="concepto" label="Concepto" rules={[{ required: true }]}>

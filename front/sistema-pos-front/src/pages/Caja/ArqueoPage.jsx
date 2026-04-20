@@ -27,6 +27,7 @@ export default function ArqueoPage() {
   const [billetajeNIO, setBilletajeNIO] = useState([]);
   const [billetajeUSD, setBilletajeUSD] = useState([]);
   const [tipoCambio, setTipoCambio] = useState(36.6);
+  const [depositoTransferencia, setDepositoTransferencia] = useState(0);
   const [form] = Form.useForm();
 
   const { cajaActual, setCajaActual, limpiarCaja } = useCajaStore();
@@ -72,7 +73,7 @@ export default function ArqueoPage() {
         toast.error('No hay una caja abierta');
         navigate('/caja');
       }
-    } catch (err) {
+      } catch {
       navigate('/caja');
     } finally {
       setLoading(false);
@@ -105,13 +106,22 @@ export default function ArqueoPage() {
     [totalNIO, totalUSDConvertido]
   );
   const saldoSistema = useMemo(() => Number(stats?.saldoActual || 0), [stats]);
+  const saldoSistemaAjustado = useMemo(
+    () => round2(Number(saldoSistema) - Number(depositoTransferencia || 0)),
+    [saldoSistema, depositoTransferencia]
+  );
   const diferencia = useMemo(() => {
     // Si el saldo del sistema es negativo, el sistema está indicando un faltante (deuda).
     // En ese caso, la diferencia debe reflejar faltante (negativa) cuando el físico no alcanza.
     // Ej: sistema = -100, físico = 0 => diferencia = -100
-    if (saldoSistema < 0) return round2(totalConsolidado + saldoSistema);
-    return round2(totalConsolidado - saldoSistema);
-  }, [totalConsolidado, saldoSistema]);
+    if (saldoSistemaAjustado < 0) return round2(totalConsolidado + saldoSistemaAjustado);
+    return round2(totalConsolidado - saldoSistemaAjustado);
+  }, [totalConsolidado, saldoSistemaAjustado]);
+
+  const montoAEntregar = useMemo(
+    () => round2(Number(totalConsolidado) - Number(depositoTransferencia || 0)),
+    [totalConsolidado, depositoTransferencia]
+  );
 
   const handleFinalizarCierre = async () => {
     if (closing) return;
@@ -140,6 +150,7 @@ export default function ArqueoPage() {
       const payload = { 
         billetaje: [...bNIO, ...bUSD],
         tipoCambio: Number(tipoCambio),
+        depositoTransferencia: Number(depositoTransferencia || 0),
         observaciones: form.getFieldValue('observaciones') || ''
       };
 
@@ -177,9 +188,21 @@ export default function ArqueoPage() {
         <Col span={24}>
            <Card style={{ background: '#fafafa', border: '1px solid #d9d9d9' }}>
              <Row gutter={16} align="middle">
-               <Col span={6}><Statistic title="Sistema (NIO)" value={saldoSistema} prefix="C$" /></Col>
-               <Col span={6}><Statistic title="Físico (Convo)" value={totalConsolidado} prefix="C$" valueStyle={{ color: '#1677ff', fontWeight: 'bold' }} /></Col>
-               <Col span={6}>
+               <Col xs={24} md={12} lg={5}><Statistic title="Sistema (NIO)" value={saldoSistema} prefix="C$" /></Col>
+               <Col xs={24} md={12} lg={5}><Statistic title="Físico (Convo)" value={totalConsolidado} prefix="C$" valueStyle={{ color: '#1677ff', fontWeight: 'bold' }} /></Col>
+               <Col xs={24} md={12} lg={5}>
+                 <Text strong style={{ fontSize: 12 }}>DEPÓSITO / TRANSFERENCIA</Text>
+                 <InputNumber
+                   size="large"
+                   value={depositoTransferencia}
+                   onChange={(v) => setDepositoTransferencia(v ?? 0)}
+                   style={{ width: '100%', fontSize: 18, fontWeight: 'bold' }}
+                   precision={2}
+                   min={0}
+                   prefix="C$"
+                 />
+               </Col>
+               <Col xs={24} md={12} lg={5}>
                   <div style={{ padding: '10px', background: diferencia < 0 ? '#fff1f0' : '#f6ffed', borderRadius: 8, textAlign: 'center' }}>
                     <Text type="secondary" style={{ fontSize: 11 }}>DIFERENCIA</Text>
                     <Title level={4} style={{ margin: 0, color: diferencia < 0 ? '#f5222d' : '#52c41a' }}>
@@ -187,7 +210,8 @@ export default function ArqueoPage() {
                     </Title>
                   </div>
                </Col>
-               <Col span={6}>
+               
+               <Col xs={24} md={12} lg={4}>
                  <Text strong style={{ fontSize: 12 }}>TASA DE CAMBIO</Text>
                  <InputNumber 
                    size="large" 

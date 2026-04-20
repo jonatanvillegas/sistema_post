@@ -34,6 +34,7 @@ const cajaSchema = new mongoose.Schema(
     totalVentas: { type: Number, default: 0 },
     totalIngresos: { type: Number, default: 0 },
     totalEgresos: { type: Number, default: 0 },
+    depositoTransferencia: { type: Number, default: 0 },
     diferencia: { type: Number, default: null },
     tipoCambio: { type: Number, default: 36.6 },
     estado: { type: String, enum: ['abierta', 'cerrada'], default: 'abierta' },
