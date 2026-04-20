@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Row, Col, Card, Typography, Spin, Table, Tag, Space } from 'antd';
+import { useNavigate } from 'react-router-dom';
 import { 
   RiseOutlined, 
   FallOutlined, 
@@ -19,6 +20,7 @@ import { formatCurrency, formatNumber } from '../../utils/formatters';
 const { Title, Text } = Typography;
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [resumen, setResumen] = useState(null);
   const [ventasStats, setVentasStats] = useState(null);
@@ -51,8 +53,14 @@ export default function DashboardPage() {
 
   const COLORS = ['#1677ff', '#52c41a', '#faad14', '#f5222d', '#722ed1'];
 
-  const StatCard = ({ title, value, icon, color, subValue, subLabel, trend }) => (
-    <Card className="stat-card" bordered={false}>
+  const StatCard = ({ title, value, icon, color, subValue, subLabel, onClick }) => (
+    <Card
+      className="stat-card"
+      bordered={false}
+      hoverable={Boolean(onClick)}
+      onClick={onClick}
+      style={onClick ? { cursor: 'pointer' } : undefined}
+    >
       <div className="stat-card-inner">
         <div className="stat-header">
           <div className="stat-info">
@@ -115,6 +123,7 @@ export default function DashboardPage() {
             color="#f59e0b"
             subValue="Acción requerida"
             subLabel="productos agotándose"
+            onClick={() => navigate('/inventario?stockBajo=true')}
           />
         </Col>
         <Col xs={24} sm={12} xl={6}>

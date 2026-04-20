@@ -106,7 +106,7 @@ export default function UsuariosPage() {
       title: 'Rol',
       dataIndex: 'rol',
       render: (rol) => (
-        <Tag color={rol === 'admin' ? 'purple' : 'blue'} icon={<KeyOutlined />}>
+        <Tag color={rol === 'admin' ? 'purple' : rol === 'inventario' ? 'geekblue' : 'blue'} icon={<KeyOutlined />}>
            {rol.toUpperCase()}
         </Tag>
       )
@@ -160,7 +160,7 @@ export default function UsuariosPage() {
 
       <Alert 
         message="Seguridad del Sistema"
-        description="Como administrador, puedes gestionar los accesos. Recuerda asignar el rol de 'Cajero' para personal operativo y 'Admin' solo para gerencia."
+        description="Roles: Cajero (Punto de Venta, Caja, Clientes), Inventario (Inventario, Proveedores) y Admin (todo el sistema + configuración)."
         type="info"
         showIcon
         style={{ marginBottom: 20 }}
@@ -205,6 +205,7 @@ export default function UsuariosPage() {
                 <Form.Item name="rol" label="Rol de Usuario" initialValue="cajero">
                    <Select>
                       <Option value="cajero">Cajero / Operario</Option>
+                   <Option value="inventario">Encargado de Inventario</Option>
                       <Option value="admin">Administrador</Option>
                    </Select>
                 </Form.Item>

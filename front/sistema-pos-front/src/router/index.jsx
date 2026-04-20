@@ -11,6 +11,13 @@ import UsuariosPage from '../pages/Usuarios/UsuariosPage';
 import ArqueoPage from '../pages/Caja/ArqueoPage';
 import ClientesPage from '../pages/Clientes/ClientesPage';
 import AjustesPage from '../pages/Usuarios/AjustesPage';
+import CategoriasPage from '../pages/Categorias/CategoriasPage';
+import { useAuthStore } from '../store/authStore';
+
+const HomeRedirect = () => {
+  const { getHomePath } = useAuthStore();
+  return <Navigate to={getHomePath()} replace />;
+};
 
 export default function AppRouter() {
   return (
@@ -20,22 +27,34 @@ export default function AppRouter() {
 
         <Route element={<PrivateRoute />}>
           <Route element={<AppLayout />}>
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/ventas" element={<VentasPage />} />
-            <Route path="/inventario" element={<InventarioPage />} />
-            <Route path="/caja" element={<CajaPage />} />
-            <Route path="/caja/arqueo" element={<ArqueoPage />} />
-            <Route path="/proveedores" element={<ProveedoresPage />} />
-            <Route path="/clientes" element={<ClientesPage />} />
+            {/* Admin */}
+            <Route element={<PrivateRoute allowedRoles={["admin"]} />}>
+              <Route path="/dashboard" element={<DashboardPage />} />
+            </Route>
+
+            {/* Cajero */}
+            <Route element={<PrivateRoute allowedRoles={["admin", "cajero"]} />}>
+              <Route path="/ventas" element={<VentasPage />} />
+              <Route path="/caja" element={<CajaPage />} />
+              <Route path="/caja/arqueo" element={<ArqueoPage />} />
+              <Route path="/clientes" element={<ClientesPage />} />
+            </Route>
+
+            {/* Encargado de Inventario */}
+            <Route element={<PrivateRoute allowedRoles={["admin", "inventario"]} />}>
+              <Route path="/inventario" element={<InventarioPage />} />
+              <Route path="/proveedores" element={<ProveedoresPage />} />
+            </Route>
 
             {/* Solo Admin */}
             <Route element={<PrivateRoute adminOnly />}>
               <Route path="/usuarios" element={<UsuariosPage />} />
               <Route path="/ajustes" element={<AjustesPage />} />
+              <Route path="/categorias" element={<CategoriasPage />} />
             </Route>
 
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/" element={<HomeRedirect />} />
+            <Route path="*" element={<HomeRedirect />} />
           </Route>
         </Route>
       </Routes>

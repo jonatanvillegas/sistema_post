@@ -9,10 +9,12 @@ import {
   BarcodeOutlined
 } from '@ant-design/icons';
 import { toast } from 'react-hot-toast';
+import { useSearchParams } from 'react-router-dom';
 import { 
   getProductos, createProducto, updateProducto, deleteProducto, getKardex 
 } from '../../api/inventario.api';
 import { getProveedores } from '../../api/proveedores.api';
+import { getCategorias } from '../../api/categorias.api';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 import StockBadge from '../../components/StockBadge';
 import { useAuthStore } from '../../store/authStore';
@@ -49,19 +51,32 @@ export default function InventarioPage() {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState([]);
   const [proveedores, setProveedores] = useState([]);
+  const [categorias, setCategorias] = useState([]);
   const [busqueda, setBusqueda] = useState('');
+  const [stockBajoFilter, setStockBajoFilter] = useState(false);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isKardexVisible, setIsKardexVisible] = useState(false);
   const [kardexData, setKardexData] = useState([]);
   const [editingProducto, setEditingProducto] = useState(null);
   const [form] = Form.useForm();
-  const { isAdmin } = useAuthStore();
+  const { isAdmin, hasAnyRole } = useAuthStore();
+  const canManage = hasAnyRole(['admin', 'inventario']);
+
+  const [searchParams] = useSearchParams();
 
   const isAutoUpdatingRef = useRef(false);
   const barcodeCanvasRef = useRef(null);
   const codigoValue = Form.useWatch('codigo', form);
+  const categoriaValue = Form.useWatch('categoria', form);
   const [barcodeError, setBarcodeError] = useState('');
   const [barcodeAssistEnabled, setBarcodeAssistEnabled] = useState(false);
+
+  useEffect(() => {
+    const qStockBajo = searchParams.get('stockBajo') === 'true';
+    const qBuscar = searchParams.get('buscar');
+    setStockBajoFilter(qStockBajo);
+    if (qBuscar !== null) setBusqueda(qBuscar);
+  }, [searchParams]);
 
   const round2 = (n) => Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100;
   const round1 = (n) => Math.round((Number(n || 0) + Number.EPSILON) * 10) / 10;
@@ -169,7 +184,7 @@ export default function InventarioPage() {
     setLoading(true);
     try {
       const [resProd, resProv] = await Promise.all([
-        getProductos({ buscar: busqueda }),
+        getProductos({ buscar: busqueda, stockBajo: stockBajoFilter ? 'true' : undefined }),
         getProveedores()
       ]);
       setData(resProd.data);
@@ -178,6 +193,16 @@ export default function InventarioPage() {
       toast.error('Error al cargar datos del inventario');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchCategorias = async () => {
+    try {
+      const res = await getCategorias();
+      setCategorias(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      // No bloquear inventario si falla categorías
+      setCategorias([]);
     }
   };
 
@@ -244,8 +269,12 @@ export default function InventarioPage() {
   }, [isModalVisible, busqueda]);
 
   useEffect(() => {
+    fetchCategorias();
+  }, []);
+
+  useEffect(() => {
     fetchData();
-  }, [busqueda]);
+  }, [busqueda, stockBajoFilter]);
 
   const handleOpenModal = (producto = null) => {
     setEditingProducto(producto);
@@ -414,12 +443,14 @@ export default function InventarioPage() {
       render: (_, record) => (
         <Space>
            <Button icon={<HistoryOutlined />} size="small" onClick={() => showKardex(record)}>Kardex</Button>
-           {isAdmin() && (
+           {canManage && (
              <>
                <Button icon={<EditOutlined />} size="small" type="primary" ghost onClick={() => handleOpenModal(record)} />
-               <Popconfirm title="¿Eliminar producto?" onConfirm={() => handleDelete(record._id)}>
-                 <Button icon={<DeleteOutlined />} size="small" danger ghost />
-               </Popconfirm>
+               {isAdmin() && (
+                 <Popconfirm title="¿Eliminar producto?" onConfirm={() => handleDelete(record._id)}>
+                   <Button icon={<DeleteOutlined />} size="small" danger ghost />
+                 </Popconfirm>
+               )}
              </>
            )}
         </Space>
@@ -434,7 +465,7 @@ export default function InventarioPage() {
           <Title level={2} className="page-title">Inventario</Title>
           <Text className="page-sub">Gestión de productos y control de stock centralizado.</Text>
         </div>
-        {isAdmin() && (
+        {canManage && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => handleOpenModal()}>
             Nuevo Producto
           </Button>
@@ -531,11 +562,17 @@ export default function InventarioPage() {
             <Col span={8}>
               <Form.Item name="categoria" label="Categoría" initialValue="General">
                 <Select>
-                  <Option value="General">General</Option>
-                  <Option value="Bebidas">Bebidas</Option>
-                  <Option value="Alimentos">Alimentos</Option>
-                  <Option value="Limpieza">Limpieza</Option>
-                  <Option value="Hogar">Hogar</Option>
+                  {Array.from(
+                    new Set([
+                      'General',
+                      ...(categorias || []).map((c) => c?.nombre).filter(Boolean),
+                      ...(categoriaValue ? [categoriaValue] : []),
+                    ])
+                  ).map((nombre) => (
+                    <Option key={nombre} value={nombre}>
+                      {nombre}
+                    </Option>
+                  ))}
                 </Select>
               </Form.Item>
             </Col>

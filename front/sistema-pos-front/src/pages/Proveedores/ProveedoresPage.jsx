@@ -48,8 +48,10 @@ export default function ProveedoresPage() {
   const [form] = Form.useForm();
   const [formCompra] = Form.useForm();
   const [formEditarCompra] = Form.useForm();
-  const { isAdmin } = useAuthStore();
+  const { isAdmin, hasAnyRole } = useAuthStore();
   const { setCajaActual, limpiarCaja } = useCajaStore();
+
+  const canManage = hasAnyRole(['admin', 'inventario']);
 
   // Carrito de compra a proveedor local state
   const [compraItems, setCompraItems] = useState([]);
@@ -293,16 +295,20 @@ export default function ProveedoresPage() {
           <Text className="page-sub">Centralice la gestión de abastecimiento y compras directas.</Text>
         </div>
         <Space>
+          {canManage && (
+            <>
             <Button 
-                type="dashed" 
-                icon={<PlusCircleOutlined />} 
-                onClick={() => setIsModalCompraVisible(true)}
+              type="dashed" 
+              icon={<PlusCircleOutlined />} 
+              onClick={() => setIsModalCompraVisible(true)}
             >
-                Registrar Compra / Factura
+              Registrar Compra / Factura
             </Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => handleOpenModal()}>
-                Nuevo Proveedor
+              Nuevo Proveedor
             </Button>
+            </>
+          )}
         </Space>
       </div>
 
@@ -487,7 +493,7 @@ export default function ProveedoresPage() {
               align: 'right',
               render: (_, record) => (
                 <Space>
-                  {isAdmin() && (
+                  {canManage && (
                     <>
                       <Button
                         size="small"

@@ -11,7 +11,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
-  const { login: loginStore } = useAuthStore();
+  const { login: loginStore, getHomePath } = useAuthStore();
   const { setCajaActual } = useCajaStore();
 
   const onFinish = async (values) => {
@@ -29,7 +29,7 @@ export default function LoginPage() {
         setCajaActual(null);
       }
 
-      navigate('/dashboard');
+      navigate(getHomePath());
     } catch (err) {
       setError(err.response?.data?.mensaje || 'Error al iniciar sesión');
     } finally {

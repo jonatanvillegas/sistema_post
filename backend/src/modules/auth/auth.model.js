@@ -22,7 +22,7 @@ const userSchema = new mongoose.Schema(
     },
     rol: {
       type: String,
-      enum: ['admin', 'cajero'],
+      enum: ['admin', 'cajero', 'inventario'],
       default: 'cajero',
     },
     estado: {

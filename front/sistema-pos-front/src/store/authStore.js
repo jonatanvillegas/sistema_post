@@ -12,6 +12,22 @@ export const useAuthStore = create(
       logout: () => set({ token: null, usuario: null }),
 
       isAdmin: () => get().usuario?.rol === 'admin',
+      isCajero: () => get().usuario?.rol === 'cajero',
+      isInventario: () => get().usuario?.rol === 'inventario',
+
+      hasAnyRole: (roles = []) => {
+        const rol = get().usuario?.rol;
+        if (!rol) return false;
+        if (!Array.isArray(roles) || roles.length === 0) return true;
+        return roles.includes(rol);
+      },
+
+      getHomePath: () => {
+        const rol = get().usuario?.rol;
+        if (rol === 'admin') return '/dashboard';
+        if (rol === 'inventario') return '/inventario';
+        return '/ventas';
+      },
 
       isAuthenticated: () => !!get().token,
     }),

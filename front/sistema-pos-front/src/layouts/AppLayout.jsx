@@ -14,7 +14,7 @@ import { useCajaStore } from '../store/cajaStore';
 
 const { Sider, Header, Content } = Layout;
 
-const menuItems = [
+const adminMenuItems = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: 'Dashboard' },
   { key: '/ventas', icon: <ShoppingCartOutlined />, label: 'Punto de Venta' },
   { key: '/inventario', icon: <InboxOutlined />, label: 'Inventario' },
@@ -23,8 +23,20 @@ const menuItems = [
   { key: '/clientes', icon: <UserOutlined />, label: 'Clientes' },
 ];
 
+const cajeroMenuItems = [
+  { key: '/ventas', icon: <ShoppingCartOutlined />, label: 'Punto de Venta' },
+  { key: '/caja', icon: <DollarOutlined />, label: 'Caja' },
+  { key: '/clientes', icon: <UserOutlined />, label: 'Clientes' },
+];
+
+const inventarioMenuItems = [
+  { key: '/inventario', icon: <InboxOutlined />, label: 'Inventario' },
+  { key: '/proveedores', icon: <TruckOutlined />, label: 'Proveedores' },
+];
+
 const adminItems = [
   { key: '/usuarios', icon: <UserOutlined />, label: 'Usuarios' },
+  { key: '/categorias', icon: <InboxOutlined />, label: 'Categorías' },
   { key: '/ajustes', icon: <SettingOutlined />, label: 'Ajustes' },
 ];
 
@@ -32,7 +44,7 @@ export default function AppLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { usuario, logout, isAdmin } = useAuthStore();
+  const { usuario, logout, isAdmin, isCajero, isInventario, getHomePath } = useAuthStore();
   const { cajaActual } = useCajaStore();
 
   const handleMenuClick = ({ key }) => navigate(key);
@@ -56,14 +68,22 @@ export default function AppLayout() {
     },
   };
 
+  const baseMenu = isAdmin()
+    ? adminMenuItems
+    : isInventario()
+      ? inventarioMenuItems
+      : isCajero()
+        ? cajeroMenuItems
+        : cajeroMenuItems;
+
   const allMenuItems = isAdmin()
     ? [
-        ...menuItems,
+        ...baseMenu,
         { type: 'divider' },
         { key: 'admin-group', label: 'Administración', type: 'group' },
         ...adminItems,
       ]
-    : menuItems;
+    : baseMenu;
 
   return (
     <Layout className="app-layout" style={{ minHeight: '100vh' }}>
@@ -74,7 +94,7 @@ export default function AppLayout() {
         collapsed={collapsed}
         theme="dark"
       >
-        <div className="sidebar-logo" onClick={() => navigate('/dashboard')}>
+        <div className="sidebar-logo" onClick={() => navigate(getHomePath())}>
           <div className="sidebar-logo-icon">
             <AppstoreOutlined />
           </div>

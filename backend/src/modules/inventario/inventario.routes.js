@@ -16,8 +16,8 @@ router.get('/stock-bajo', protect, getStockBajo);
 router.get('/kardex/:id', protect, getKardex);
 router.get('/', protect, getProductos);
 router.get('/:id', protect, getProductoById);
-router.post('/', protect, authorizeRoles('admin', 'cajero'), createProducto);
-router.put('/:id', protect, authorizeRoles('admin', 'cajero'), updateProducto);
+router.post('/', protect, authorizeRoles('admin', 'inventario'), createProducto);
+router.put('/:id', protect, authorizeRoles('admin', 'inventario'), updateProducto);
 router.delete('/:id', protect, authorizeRoles('admin'), deleteProducto);
 
 module.exports = router;
