@@ -15,11 +15,22 @@ import {
   getComprasProveedor, registrarCompra, updateCompra, deleteCompra 
 } from '../../api/proveedores.api';
 import { getProductos } from '../../api/inventario.api';
+import { getCajaActual } from '../../api/caja.api';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 import { useAuthStore } from '../../store/authStore';
+import { useCajaStore } from '../../store/cajaStore';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
+
+const normalize = (v) => String(v ?? '').toLowerCase();
+
+const filterProductoOption = (input, option) => {
+  const raw = option?.children;
+  // children puede ser ReactNode; en este caso es texto interpolado.
+  const text = Array.isArray(raw) ? raw.join(' ') : String(raw ?? '');
+  return normalize(text).includes(normalize(input));
+};
 
 export default function ProveedoresPage() {
   const [loading, setLoading] = useState(false);
@@ -38,6 +49,7 @@ export default function ProveedoresPage() {
   const [formCompra] = Form.useForm();
   const [formEditarCompra] = Form.useForm();
   const { isAdmin } = useAuthStore();
+  const { setCajaActual, limpiarCaja } = useCajaStore();
 
   // Carrito de compra a proveedor local state
   const [compraItems, setCompraItems] = useState([]);
@@ -46,6 +58,16 @@ export default function ProveedoresPage() {
     fetchData();
     fetchProductos();
   }, []);
+
+  const refreshCajaActual = async () => {
+    try {
+      const res = await getCajaActual();
+      if (res?.data?.caja) setCajaActual(res.data.caja);
+    } catch (err) {
+      // Si no hay caja abierta o falla, limpiamos el estado para que la UI sea consistente
+      limpiarCaja();
+    }
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -177,6 +199,7 @@ export default function ProveedoresPage() {
         productos: compraItems,
       });
       toast.success('Compra corregida e inventario recalculado');
+      await refreshCajaActual();
       setIsModalEditarCompraVisible(false);
       setEditingCompra(null);
       setCompraItems([]);
@@ -191,6 +214,7 @@ export default function ProveedoresPage() {
     try {
       await deleteCompra(compraId);
       toast.success('Compra anulada y stock revertido');
+      await refreshCajaActual();
       if (selectedProveedor?._id) await fetchCompras(selectedProveedor._id);
     } catch (err) {
       toast.error(err.response?.data?.mensaje || 'Error al anular compra');
@@ -209,11 +233,12 @@ export default function ProveedoresPage() {
             total: totalCompra
         });
         toast.success('¡Compra registrada e inventario actualizado!');
+      await refreshCajaActual();
         setIsModalCompraVisible(false);
         setCompraItems([]);
         formCompra.resetFields();
     } catch (err) {
-        toast.error('Error al registrar compra');
+      toast.error(err.response?.data?.mensaje || 'Error al registrar compra');
     }
   };
 
@@ -362,6 +387,8 @@ export default function ProveedoresPage() {
               showSearch
               placeholder="Escriba para buscar producto y agregar a la lista..."
               style={{ width: '100%' }}
+              optionFilterProp="children"
+              filterOption={filterProductoOption}
               onSelect={onAgregarItemCompra}
               value={null}
             >
@@ -519,6 +546,8 @@ export default function ProveedoresPage() {
               showSearch
               placeholder="Buscar producto y agregar a la compra..."
               style={{ width: '100%' }}
+              optionFilterProp="children"
+              filterOption={filterProductoOption}
               onSelect={onAgregarItemCompra}
               value={null}
             >

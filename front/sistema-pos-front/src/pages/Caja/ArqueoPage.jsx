@@ -17,6 +17,8 @@ import { useCajaStore } from '../../store/cajaStore';
 
 const { Title, Text } = Typography;
 
+const round2 = (n) => Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100;
+
 export default function ArqueoPage() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -85,12 +87,31 @@ export default function ArqueoPage() {
     setBilletajeUSD(prev => prev.map(b => b.denominacion === denominacion ? { ...b, cantidad: Number(cantidad) || 0 } : b));
   };
 
-  const totalNIO = useMemo(() => billetajeNIO.reduce((s, b) => s + (Number(b.denominacion) * Number(b.cantidad)), 0), [billetajeNIO]);
-  const totalUSD = useMemo(() => billetajeUSD.reduce((s, b) => s + (Number(b.denominacion) * Number(b.cantidad)), 0), [billetajeUSD]);
-  
-  const totalUSDConvertido = useMemo(() => Number(totalUSD) * Number(tipoCambio), [totalUSD, tipoCambio]);
-  const totalConsolidado = useMemo(() => Number(totalNIO) + totalUSDConvertido, [totalNIO, totalUSDConvertido]);
-  const diferencia = useMemo(() => totalConsolidado - (stats?.saldoActual || 0), [totalConsolidado, stats]);
+  const totalNIO = useMemo(
+    () => round2(billetajeNIO.reduce((s, b) => round2(s + round2(Number(b.denominacion) * Number(b.cantidad))), 0)),
+    [billetajeNIO]
+  );
+  const totalUSD = useMemo(
+    () => round2(billetajeUSD.reduce((s, b) => round2(s + round2(Number(b.denominacion) * Number(b.cantidad))), 0)),
+    [billetajeUSD]
+  );
+
+  const totalUSDConvertido = useMemo(
+    () => round2(Number(totalUSD) * Number(tipoCambio || 0)),
+    [totalUSD, tipoCambio]
+  );
+  const totalConsolidado = useMemo(
+    () => round2(Number(totalNIO) + Number(totalUSDConvertido)),
+    [totalNIO, totalUSDConvertido]
+  );
+  const saldoSistema = useMemo(() => Number(stats?.saldoActual || 0), [stats]);
+  const diferencia = useMemo(() => {
+    // Si el saldo del sistema es negativo, el sistema está indicando un faltante (deuda).
+    // En ese caso, la diferencia debe reflejar faltante (negativa) cuando el físico no alcanza.
+    // Ej: sistema = -100, físico = 0 => diferencia = -100
+    if (saldoSistema < 0) return round2(totalConsolidado + saldoSistema);
+    return round2(totalConsolidado - saldoSistema);
+  }, [totalConsolidado, saldoSistema]);
 
   const handleFinalizarCierre = async () => {
     if (closing) return;
@@ -156,7 +177,7 @@ export default function ArqueoPage() {
         <Col span={24}>
            <Card style={{ background: '#fafafa', border: '1px solid #d9d9d9' }}>
              <Row gutter={16} align="middle">
-               <Col span={6}><Statistic title="Sistema (NIO)" value={stats?.saldoActual || 0} prefix="C$" /></Col>
+               <Col span={6}><Statistic title="Sistema (NIO)" value={saldoSistema} prefix="C$" /></Col>
                <Col span={6}><Statistic title="Físico (Convo)" value={totalConsolidado} prefix="C$" valueStyle={{ color: '#1677ff', fontWeight: 'bold' }} /></Col>
                <Col span={6}>
                   <div style={{ padding: '10px', background: diferencia < 0 ? '#fff1f0' : '#f6ffed', borderRadius: 8, textAlign: 'center' }}>
@@ -171,7 +192,7 @@ export default function ArqueoPage() {
                  <InputNumber 
                    size="large" 
                    value={tipoCambio} 
-                   onChange={setTipoCambio} 
+                   onChange={(v) => setTipoCambio(v ?? 0)} 
                    style={{ width: '100%', fontSize: 24, fontWeight: 'bold' }}
                    precision={2}
                    prefix="C$"

@@ -81,10 +81,39 @@ Para que el sistema funcione correctamente en modo local, es necesario instalar:
 ## 🏠 Despliegue en Escritorio (Electron)
 
 Este proyecto está diseñado para ser empaquetado con Electron. Al hacerlo:
-- El sistema se convierte en un único `.exe`.
-- No es necesario que el cliente instale Node.js.
-- El servidor backend puede ejecutarse como un proceso hijo (child process) dentro de la aplicación.
 
+## Despliegue en Coolify (Web + API)
+
+Este repo incluye un `Dockerfile` en la raíz que:
+- Construye el frontend (Vite) en `front/sistema-pos-front/dist`.
+- Levanta el backend (Express) y sirve el frontend como SPA.
+
+### 1) Crear aplicación en Coolify
+- Source: tu repo (GitHub/GitLab).
+- Build Pack: **Dockerfile**.
+- Puerto: usa el puerto de la app (por defecto `5000`).
+
+### 2) Variables de entorno (Coolify)
+Configura estas variables en el servicio:
+- `PORT=5000` (o el que prefieras; Coolify puede mapearlo)
+- `NODE_ENV=production`
+- `MONGO_URI=mongodb://USER:PASS@HOST:27017/DB?authSource=admin` (tu Mongo remoto)
+- `JWT_SECRET=...` (obligatorio)
+- `JWT_EXPIRES_IN=8h` (opcional)
+
+**Admin inicial (recomendado)**
+- En producción no se crea admin automáticamente.
+- Si quieres crear el admin solo la primera vez:
+  - `SEED_ADMIN=true`
+  - `ADMIN_EMAIL=admin@admin.com`
+  - `ADMIN_PASSWORD=UnaClaveSegura`
+Luego puedes quitar `SEED_ADMIN` o dejarlo en `false`.
+
+### 3) URL
+- La UI queda en: `https://TU-DOMINIO/`
+- La API queda en: `https://TU-DOMINIO/api/health`
+
+Si despliegas el frontend separado, define `VITE_API_URL` al construir el front.
 ---
 
 ## 📝 Créditos e Integraciones

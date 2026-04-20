@@ -56,6 +56,7 @@ const getResumen = async (req, res) => {
     // Productos con stock bajo
     const stockBajo = await Producto.countDocuments({
       estado: true,
+      controlaStock: { $ne: false },
       $expr: { $lte: ['$stock', '$stockMinimo'] },
     });
 
@@ -77,7 +78,7 @@ const getResumen = async (req, res) => {
         { $sort: { cantidad: -1 } },
       ]),
       Producto.aggregate([
-        { $match: { estado: true } },
+        { $match: { estado: true, controlaStock: { $ne: false } } },
         {
           $group: {
             _id: null,
@@ -207,6 +208,7 @@ const getInventarioDashboard = async (req, res) => {
     // Productos con stock bajo
     const stockBajo = await Producto.find({
       estado: true,
+      controlaStock: { $ne: false },
       $expr: { $lte: ['$stock', '$stockMinimo'] },
     })
       .select('nombre stock stockMinimo categoria')
@@ -215,7 +217,7 @@ const getInventarioDashboard = async (req, res) => {
 
     // Valor total del inventario
     const valorInventario = await Producto.aggregate([
-      { $match: { estado: true } },
+      { $match: { estado: true, controlaStock: { $ne: false } } },
       {
         $group: {
           _id: null,

@@ -13,13 +13,15 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import dayjs from 'dayjs';
 import { 
-  getCajaActual, abrirCaja, getHistorialCaja, registrarEgreso 
+  getCajaActual, abrirCaja, getHistorialCaja, registrarEgreso, exportTransaccionesCaja
 } from '../../api/caja.api';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 import { useCajaStore } from '../../store/cajaStore';
 import { useAuthStore } from '../../store/authStore';
 
 const { Title, Text } = Typography;
+
+const round2 = (n) => Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100;
 
 export default function CajaPage() {
   const navigate = useNavigate();
@@ -31,6 +33,7 @@ export default function CajaPage() {
   const [isModalEgresoVisible, setIsModalEgresoVisible] = useState(false);
   const [isModalDetalleVisible, setIsModalDetalleVisible] = useState(false);
   const [selectedCajaHistorial, setSelectedCajaHistorial] = useState(null);
+  const [loadingReporte, setLoadingReporte] = useState(false);
   
   const [form] = Form.useForm();
   const { cajaActual, setCajaActual, limpiarCaja } = useCajaStore();
@@ -95,9 +98,42 @@ export default function CajaPage() {
     }
   };
 
+  const descargarReporteTransacciones = async () => {
+    const desde = filtrosHistorial.desde ? filtrosHistorial.desde.format('YYYY-MM-DD') : null;
+    const hasta = filtrosHistorial.hasta ? filtrosHistorial.hasta.format('YYYY-MM-DD') : null;
+
+    if (!desde || !hasta) {
+      toast.error('Seleccione un rango de fechas para el reporte');
+      return;
+    }
+
+    setLoadingReporte(true);
+    try {
+      const res = await exportTransaccionesCaja({ desde, hasta });
+      const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `transacciones_caja_${desde}_a_${hasta}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success('Reporte descargado');
+    } catch (err) {
+      toast.error(err.response?.data?.mensaje || 'No se pudo descargar el reporte');
+    } finally {
+      setLoadingReporte(false);
+    }
+  };
+
   const movimientosTurno = useMemo(() => {
     if (!cajaActual) return [];
-    const ingresos = (cajaActual.ingresos || []).map(m => ({ ...m, realTipo: 'ingreso', key: `ing-${m._id}` }));
+    const ingresos = (cajaActual.ingresos || []).map(m => ({
+      ...m,
+      realTipo: m.tipo === 'venta_credito' ? 'info' : 'ingreso',
+      key: `ing-${m._id}`
+    }));
     const egresos = (cajaActual.egresos || []).map(m => ({ ...m, realTipo: 'egreso', key: `egr-${m._id}` }));
     return [...ingresos, ...egresos].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   }, [cajaActual]);
@@ -115,7 +151,9 @@ export default function CajaPage() {
       render: (text, record) => (
         <Space direction="vertical" size={0}>
           <Text strong style={{ fontSize: 13 }}>{text}</Text>
-          <Text type="secondary" style={{ fontSize: 11 }}>{record.tipo.toUpperCase()}</Text>
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            {record.tipo === 'venta_credito' ? 'PEDIDO (CRÉDITO)' : record.tipo.toUpperCase()}
+          </Text>
         </Space>
       )
     },
@@ -124,8 +162,18 @@ export default function CajaPage() {
       dataIndex: 'monto', 
       align: 'right',
       render: (val, record) => (
-        <Text strong style={{ color: record.realTipo === 'ingreso' ? '#52c41a' : '#f5222d' }}>
-          {record.realTipo === 'ingreso' ? '+' : '-'} {formatCurrency(val)}
+        <Text
+          strong
+          style={{
+            color:
+              record.realTipo === 'ingreso'
+                ? '#52c41a'
+                : record.realTipo === 'egreso'
+                ? '#f5222d'
+                : '#8c8c8c',
+          }}
+        >
+          {record.realTipo === 'ingreso' ? '+' : record.realTipo === 'egreso' ? '-' : '•'} {formatCurrency(val)}
         </Text>
       )
     }
@@ -247,6 +295,7 @@ export default function CajaPage() {
                         placeholder={['Fecha Inicio', 'Fecha Fin']}
                     />
                     <Button icon={<SearchOutlined />} type="primary" onClick={fetchHistorial}>Filtrar</Button>
+                    <Button loading={loadingReporte} onClick={descargarReporteTransacciones}>Descargar CSV</Button>
                 </div>
                 <Table 
                   columns={columnsHistorial} 
@@ -294,13 +343,13 @@ export default function CajaPage() {
                                 { title: 'Moneda', dataIndex: 'moneda', render: m => <Tag color={m === 'USD' ? 'green' : 'blue'}>{m || 'NIO'}</Tag> },
                                 { title: 'Denom.', dataIndex: 'denominacion', render: v => v >= 1 ? v : `${(v*100).toFixed(0)}c` },
                                 { title: 'Cant.', dataIndex: 'cantidad' },
-                                { title: 'Total', align: 'right', render: (_, r) => formatCurrency(r.denominacion * r.cantidad) }
+                              { title: 'Total', align: 'right', render: (_, r) => formatCurrency(round2(r.denominacion * r.cantidad)) }
                             ]}
                             summary={data => (
                                 <Table.Summary.Row>
                                     <Table.Summary.Cell index={0} colSpan={2}><Text strong>Total NIO</Text></Table.Summary.Cell>
                                     <Table.Summary.Cell index={1} align="right">
-                                        <Text strong>{formatCurrency(data.reduce((sum, r) => sum + (r.denominacion * r.cantidad), 0))}</Text>
+                                  <Text strong>{formatCurrency(round2(data.reduce((sum, r) => round2(sum + round2(r.denominacion * r.cantidad)), 0)))}</Text>
                                     </Table.Summary.Cell>
                                 </Table.Summary.Row>
                             )}

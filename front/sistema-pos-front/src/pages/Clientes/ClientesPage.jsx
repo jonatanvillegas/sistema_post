@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Table, Card, Button, Input, Space, Typography, Tag, 
   Modal, Form, InputNumber, Row, Col, Divider, 
-  List, message, Alert, Tabs, Badge
+  List, message, Alert, Tabs, Badge, Select
 } from 'antd';
 import { 
   UserOutlined, SearchOutlined, PlusOutlined, 
@@ -10,13 +10,18 @@ import {
   CheckCircleOutlined, ExclamationCircleOutlined,
   WalletOutlined
 } from '@ant-design/icons';
-import { getClientes, createCliente, updateCliente } from '../../api/clientes.api';
-import { getCreditosByCliente, registrarAbono } from '../../api/creditos.api';
+import { getClientes, getClienteById, createCliente, updateCliente } from '../../api/clientes.api';
+import { getCreditosByCliente, registrarAbono, getCreditoDetalle, updateCreditoVentaProductos } from '../../api/creditos.api';
+import { getProductos } from '../../api/inventario.api';
+import { useAuthStore } from '../../store/authStore';
 import { formatCurrency } from '../../utils/formatters';
 
 const { Title, Text } = Typography;
 
 export default function ClientesPage() {
+  const currentUserRole = useAuthStore((s) => s.usuario?.rol);
+  const isAdmin = currentUserRole === 'admin';
+
   const [clientes, setClientes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [buscar, setBuscar] = useState('');
@@ -37,9 +42,34 @@ export default function ClientesPage() {
   const [selectedCredito, setSelectedCredito] = useState(null);
   const [abonoForm] = Form.useForm();
 
+  // Detalle Venta (Crédito)
+  const [isDetalleVisible, setIsDetalleVisible] = useState(false);
+  const [detalleLoading, setDetalleLoading] = useState(false);
+  const [detalleCredito, setDetalleCredito] = useState(null);
+
+  // Editar Venta (solo admin)
+  const [isEditVisible, setIsEditVisible] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
+  const [editCredito, setEditCredito] = useState(null);
+  const [lineItems, setLineItems] = useState([]);
+  const [catalogoProductos, setCatalogoProductos] = useState([]);
+
   useEffect(() => {
     cargarClientes();
   }, [buscar]);
+
+  const ensureCatalogoProductos = async () => {
+    if (catalogoProductos.length > 0) return;
+    const res = await getProductos({ buscar: '', limit: 5000 });
+    setCatalogoProductos(res.data?.productos || res.data || []);
+  };
+
+  const getSaldoDisponible = (cliente) => {
+    const limite = Number(cliente?.limiteCredito) || 0;
+    const deuda = Number(cliente?.saldoActual) || 0;
+    if (limite <= 0) return 0;
+    return Math.max(0, limite - deuda);
+  };
 
   const cargarClientes = async () => {
     setLoading(true);
@@ -69,12 +99,20 @@ export default function ClientesPage() {
     }
   };
 
-  const showStatement = async (cliente) => {
-    setSelectedCliente(cliente);
+  const showStatement = async (clienteOrId) => {
+    const clienteId = typeof clienteOrId === 'string' ? clienteOrId : clienteOrId?._id;
+    if (!clienteId) return;
+
     setIsStatementVisible(true);
     setLoadingCreditos(true);
     try {
-      const res = await getCreditosByCliente(cliente._id);
+      const [clienteRes, creditosRes] = await Promise.all([
+        getClienteById(clienteId),
+        getCreditosByCliente(clienteId),
+      ]);
+
+      setSelectedCliente(clienteRes.data);
+      const res = creditosRes;
       setCreditos(res.data);
     } catch (err) {
       message.error('Error al cargar créditos');
@@ -89,10 +127,101 @@ export default function ClientesPage() {
       message.success('Abono registrado correctamente');
       setIsAbonoVisible(false);
       // Recargar datos
-      showStatement(selectedCliente);
+      await showStatement(selectedCliente?._id);
       cargarClientes();
     } catch (err) {
-      message.error(err.response?.data?.mensaje || 'Error al registrar abono');
+      const data = err?.response?.data;
+      const detalle = data?.error ? `: ${data.error}` : '';
+      message.error(`${data?.mensaje || 'Error al registrar abono'}${detalle}`);
+    }
+  };
+
+  const openDetalleCredito = async (creditoRecord) => {
+    setIsDetalleVisible(true);
+    setDetalleLoading(true);
+    setDetalleCredito(null);
+    try {
+      const res = await getCreditoDetalle(creditoRecord._id);
+      setDetalleCredito(res.data);
+    } catch (err) {
+      message.error(err.response?.data?.mensaje || 'Error al cargar detalle del crédito');
+    } finally {
+      setDetalleLoading(false);
+    }
+  };
+
+  const openEditarVentaCredito = async (creditoRecord) => {
+    setIsEditVisible(true);
+    setEditLoading(true);
+    setEditCredito(null);
+    setLineItems([]);
+    try {
+      await ensureCatalogoProductos();
+      const res = await getCreditoDetalle(creditoRecord._id);
+      const credito = res.data;
+      setEditCredito(credito);
+
+      const items = (credito?.ventaId?.productos || []).map((p, idx) => ({
+        key: `${String(p.productoId)}-${idx}`,
+        productoId: p.productoId,
+        nombre: p.nombre,
+        codigo: p.codigo,
+        cantidad: Number(p.cantidad) || 1,
+        precioUnitario: Number(p.precioUnitario) || 0,
+      }));
+
+      setLineItems(items);
+    } catch (err) {
+      message.error(err.response?.data?.mensaje || 'Error al cargar venta del crédito');
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const updateLineItem = (key, patch) => {
+    setLineItems((prev) => prev.map((li) => (li.key === key ? { ...li, ...patch } : li)));
+  };
+
+  const addLineItem = () => {
+    setLineItems((prev) => ([
+      ...prev,
+      {
+        key: `new-${Date.now()}`,
+        productoId: null,
+        nombre: '',
+        codigo: '',
+        cantidad: 1,
+        precioUnitario: 0,
+      },
+    ]));
+  };
+
+  const removeLineItem = (key) => {
+    setLineItems((prev) => prev.filter((li) => li.key !== key));
+  };
+
+  const saveEditarVentaCredito = async () => {
+    if (!editCredito?._id) return;
+    try {
+      setEditLoading(true);
+      const payload = {
+        productos: lineItems.map((li) => ({
+          productoId: li.productoId,
+          cantidad: li.cantidad,
+          precioUnitario: li.precioUnitario,
+        })),
+      };
+
+      await updateCreditoVentaProductos(editCredito._id, payload);
+      message.success('Venta actualizada correctamente');
+      setIsEditVisible(false);
+      await showStatement(selectedCliente?._id);
+      cargarClientes();
+    } catch (err) {
+      const data = err?.response?.data;
+      message.error(data?.mensaje || 'Error al actualizar la venta');
+    } finally {
+      setEditLoading(false);
     }
   };
 
@@ -123,6 +252,23 @@ export default function ClientesPage() {
       )
     },
     {
+      title: 'Disponible',
+      key: 'saldoDisponible',
+      render: (_v, record) => {
+        const disponible = getSaldoDisponible(record);
+        const sinCredito = (Number(record?.limiteCredito) || 0) <= 0;
+
+        return (
+          <Tag
+            color={sinCredito ? 'default' : disponible > 0 ? 'green' : 'red'}
+            style={{ fontSize: 13, padding: '2px 10px' }}
+          >
+            {sinCredito ? 'N/A' : formatCurrency(disponible)}
+          </Tag>
+        );
+      }
+    },
+    {
       title: 'Acciones',
       render: (_, record) => (
         <Space>
@@ -137,7 +283,7 @@ export default function ClientesPage() {
           <Button 
             type="primary" 
             icon={<HistoryOutlined />} 
-            onClick={() => showStatement(record)}
+            onClick={() => showStatement(record._id)}
           >
             Estado Cuenta
           </Button>
@@ -223,8 +369,9 @@ export default function ClientesPage() {
         footer={null}
       >
         <Alert 
-          message={`Deuda Total: ${formatCurrency(selectedCliente?.saldoActual || 0)}`}
-          type={selectedCliente?.saldoActual > 0 ? "warning" : "success"}
+          message={`Crédito Disponible: ${formatCurrency(getSaldoDisponible(selectedCliente))}`}
+          description={`Límite: ${formatCurrency(selectedCliente?.limiteCredito || 0)} | Deuda Total: ${formatCurrency(selectedCliente?.saldoActual || 0)}`}
+          type={getSaldoDisponible(selectedCliente) > 0 ? "success" : "warning"}
           showIcon
           icon={<WalletOutlined />}
           style={{ marginBottom: 20, fontSize: 16, fontWeight: 'bold' }}
@@ -261,6 +408,14 @@ export default function ClientesPage() {
                       Abonar
                     </Button>
                   )}
+                  <Button size="small" onClick={() => openDetalleCredito(record)}>
+                    Detalle
+                  </Button>
+                  {isAdmin && (record?.abonos?.length || 0) === 0 && record.estado !== 'anulado' && (
+                    <Button size="small" onClick={() => openEditarVentaCredito(record)}>
+                      Editar productos
+                    </Button>
+                  )}
                   <Button size="small" icon={<HistoryOutlined />} onClick={() => {
                     Modal.info({
                       title: 'Historial de Abonos',
@@ -284,6 +439,145 @@ export default function ClientesPage() {
                 </Space>
               )
             }
+          ]}
+        />
+      </Modal>
+
+      {/* MODAL DETALLE DE VENTA (CRÉDITO) */}
+      <Modal
+        title={`Detalle de Venta: ${detalleCredito?.ventaId?.numeroVenta || ''}`}
+        open={isDetalleVisible}
+        onCancel={() => setIsDetalleVisible(false)}
+        footer={null}
+        width={800}
+      >
+        {detalleLoading ? (
+          <div style={{ padding: 20 }}>Cargando...</div>
+        ) : (
+          <>
+            <Row gutter={16} style={{ marginBottom: 12 }}>
+              <Col span={12}>
+                <Text type="secondary">Cliente:</Text>
+                <div><Text strong>{detalleCredito?.ventaId?.cliente?.nombre || detalleCredito?.clienteId?.nombre || 'N/A'}</Text></div>
+              </Col>
+              <Col span={12}>
+                <Text type="secondary">Total:</Text>
+                <div><Text strong>{formatCurrency(detalleCredito?.ventaId?.total || 0)}</Text></div>
+              </Col>
+            </Row>
+
+            <Table
+              size="small"
+              pagination={false}
+              rowKey={(_r, idx) => idx}
+              dataSource={detalleCredito?.ventaId?.productos || []}
+              columns={[
+                { title: 'Producto', dataIndex: 'nombre' },
+                { title: 'Código', dataIndex: 'codigo', width: 120 },
+                { title: 'Cant.', dataIndex: 'cantidad', width: 90 },
+                { title: 'Precio', dataIndex: 'precioUnitario', width: 120, render: (v) => formatCurrency(v) },
+                { title: 'Subtotal', dataIndex: 'subtotal', width: 120, render: (v) => formatCurrency(v) },
+              ]}
+            />
+          </>
+        )}
+      </Modal>
+
+      {/* MODAL EDITAR PRODUCTOS (SOLO ADMIN) */}
+      <Modal
+        title={`Editar productos: ${editCredito?.ventaId?.numeroVenta || ''}`}
+        open={isEditVisible}
+        onCancel={() => setIsEditVisible(false)}
+        onOk={saveEditarVentaCredito}
+        okText="Guardar"
+        confirmLoading={editLoading}
+        width={900}
+      >
+        <Alert
+          type="warning"
+          showIcon
+          message="Solo Administrador"
+          description="Esta acción ajusta stock y recalcula el total del crédito. No se permite si ya existen abonos."
+          style={{ marginBottom: 12 }}
+        />
+
+        <Space style={{ marginBottom: 12 }}>
+          <Button onClick={addLineItem}>Agregar producto</Button>
+        </Space>
+
+        <Table
+          size="small"
+          pagination={false}
+          rowKey="key"
+          dataSource={lineItems}
+          columns={[
+            {
+              title: 'Producto',
+              dataIndex: 'productoId',
+              render: (_v, record) => (
+                <Select
+                  showSearch
+                  style={{ width: '100%' }}
+                  placeholder="Seleccionar producto"
+                  value={record.productoId}
+                  optionFilterProp="label"
+                  options={catalogoProductos.map((p) => ({
+                    value: p._id,
+                    label: `${p.nombre}${p.codigo ? ` (${p.codigo})` : ''}`,
+                  }))}
+                  onChange={(value) => {
+                    const p = catalogoProductos.find((x) => x._id === value);
+                    updateLineItem(record.key, {
+                      productoId: value,
+                      nombre: p?.nombre || '',
+                      codigo: p?.codigo || '',
+                      precioUnitario: Number(record.precioUnitario) > 0 ? record.precioUnitario : Number(p?.precioVenta) || 0,
+                    });
+                  }}
+                />
+              ),
+            },
+            {
+              title: 'Cant.',
+              dataIndex: 'cantidad',
+              width: 120,
+              render: (v, record) => (
+                <InputNumber
+                  min={1}
+                  style={{ width: '100%' }}
+                  value={v}
+                  onChange={(val) => updateLineItem(record.key, { cantidad: Number(val) || 1 })}
+                />
+              ),
+            },
+            {
+              title: 'Precio',
+              dataIndex: 'precioUnitario',
+              width: 150,
+              render: (v, record) => (
+                <InputNumber
+                  min={0.01}
+                  precision={2}
+                  style={{ width: '100%' }}
+                  value={v}
+                  onChange={(val) => updateLineItem(record.key, { precioUnitario: Number(val) || 0 })}
+                />
+              ),
+            },
+            {
+              title: 'Subtotal',
+              key: 'subtotal',
+              width: 150,
+              render: (_v, record) => formatCurrency((Number(record.cantidad) || 0) * (Number(record.precioUnitario) || 0)),
+            },
+            {
+              title: 'Acción',
+              key: 'accion',
+              width: 120,
+              render: (_v, record) => (
+                <Button danger size="small" onClick={() => removeLineItem(record.key)}>Quitar</Button>
+              ),
+            },
           ]}
         />
       </Modal>

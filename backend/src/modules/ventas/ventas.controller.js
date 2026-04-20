@@ -5,13 +5,25 @@ const Cliente = require('../clientes/cliente.model');
 const Credito = require('../creditos/credito.model');
 const mongoose = require('mongoose');
 
+const isControlaStock = (producto) => producto?.controlaStock !== false;
+
 // @GET /api/ventas
 const getVentas = async (req, res) => {
   try {
-    const { desde, hasta, estado, page = 1, limit = 20 } = req.query;
+    const { desde, hasta, estado, buscar, page = 1, limit = 20 } = req.query;
     const filtro = {};
 
     if (estado) filtro.estado = estado;
+
+    if (buscar && String(buscar).trim()) {
+      const q = String(buscar).trim();
+      const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      filtro.$or = [
+        { numeroVenta: rx },
+        { 'cliente.nombre': rx },
+        { 'cliente.nit': rx },
+      ];
+    }
     if (desde || hasta) {
       filtro.fecha = {};
       if (desde) filtro.fecha.$gte = new Date(desde);
@@ -51,6 +63,12 @@ const createVenta = async (req, res) => {
       return res.status(400).json({ mensaje: 'La venta debe tener al menos un producto' });
     }
 
+    // 0. Caja debe estar abierta para cualquier venta/pedido
+    const cajaActiva = await Caja.findOne({ estado: 'abierta' });
+    if (!cajaActiva) {
+      return res.status(400).json({ mensaje: 'Debe abrir caja antes de realizar ventas/pedidos' });
+    }
+
     // 1. Validaciones de Crédito
     let infoCliente = cliente || { nombre: 'Consumidor Final', nit: 'CF' };
     let clienteDoc = null;
@@ -72,7 +90,8 @@ const createVenta = async (req, res) => {
       if (!producto) {
         throw new Error(`Producto ${item.productoId} no encontrado`);
       }
-      if (producto.stock < item.cantidad) {
+
+      if (isControlaStock(producto) && producto.stock < item.cantidad) {
         throw new Error(`Stock insuficiente para "${producto.nombre}". Disponible: ${producto.stock}`);
       }
 
@@ -88,30 +107,42 @@ const createVenta = async (req, res) => {
         subtotal: itemSubtotal,
       });
 
-      // 3. Descontar stock y registrar en kardex
-      const stockAnterior = producto.stock;
-      producto.stock -= item.cantidad;
-      await producto.save();
+      // 3. Descontar stock y registrar en kardex (solo si controla stock)
+      if (isControlaStock(producto)) {
+        const stockAnterior = producto.stock;
+        producto.stock -= item.cantidad;
+        await producto.save();
 
-      await Kardex.create({
-        productoId: item.productoId,
-        tipo: 'salida',
-        cantidad: item.cantidad,
-        stockAnterior,
-        stockNuevo: producto.stock,
-        motivo: 'Venta', // Se actualizará abajo
-        usuarioId: req.user._id,
-      });
+        await Kardex.create({
+          productoId: item.productoId,
+          tipo: 'salida',
+          cantidad: item.cantidad,
+          stockAnterior,
+          stockNuevo: producto.stock,
+          motivo: 'Venta', // Se actualizará abajo
+          usuarioId: req.user._id,
+        });
+      }
     }
 
     const total = subtotal - descuento;
     
     // 4. Validar límite de crédito if applica
     if (metodoPago === 'credito') {
-      const nuevoSaldo = clienteDoc.saldoActual + total;
+      const clienteObjId = new mongoose.Types.ObjectId(clienteId);
+
+      const agg = await Credito.aggregate([
+        { $match: { clienteId: clienteObjId, estado: { $in: ['pendiente', 'vencido'] } } },
+        { $group: { _id: null, total: { $sum: '$saldoPendiente' } } },
+      ]);
+
+      const deudaActual = Number(agg?.[0]?.total) || 0;
+      const nuevoSaldo = deudaActual + total;
+
       if (nuevoSaldo > clienteDoc.limiteCredito && clienteDoc.limiteCredito > 0) {
-        throw new Error(`Límite de crédito excedido. Disponible: ${clienteDoc.limiteCredito - clienteDoc.saldoActual}`);
+        throw new Error(`Límite de crédito excedido. Disponible: ${clienteDoc.limiteCredito - deudaActual}`);
       }
+
       clienteDoc.saldoActual = nuevoSaldo;
       await clienteDoc.save();
     }
@@ -120,9 +151,6 @@ const createVenta = async (req, res) => {
     if (metodoPago === 'efectivo' && montoRecibido < total) {
        throw new Error('Monto recibido insuficiente');
     }
-
-    // 5. Verificar si hay caja abierta
-    const cajaActiva = await Caja.findOne({ estado: 'abierta' });
 
     // 6. Crear la venta
     const venta = await Venta.create({
@@ -136,7 +164,7 @@ const createVenta = async (req, res) => {
       montoRecibido: metodoPago === 'credito' ? 0 : (montoRecibido || total),
       vuelto: vuelto > 0 ? vuelto : 0,
       usuarioId: req.user._id,
-      cajaId: cajaActiva ? cajaActiva._id : null,
+      cajaId: cajaActiva._id,
     });
 
     // 7. Si es crédito, crear documento de crédito
@@ -153,22 +181,31 @@ const createVenta = async (req, res) => {
       });
     }
 
-    // 8. Actualizar motivo en kardex
+    // 8. Actualizar motivo en kardex (puede no existir para productos sin control de stock)
     await Kardex.updateMany(
       { motivo: 'Venta', createdAt: { $gte: venta.createdAt } },
       { motivo: `Venta ${venta.numeroVenta}` }
     );
 
-    // 9. Registrar ingreso en caja si no es crédito
-    if (cajaActiva && metodoPago !== 'credito') {
+    // 9. Registrar movimiento en caja
+    if (metodoPago !== 'credito') {
       cajaActiva.ingresos.push({
         concepto: `Venta ${venta.numeroVenta}`,
         monto: total,
         tipo: 'venta',
         ventaId: venta._id,
       });
-      await cajaActiva.save();
+    } else {
+      // Pedido/venta al crédito: visible en movimientos, pero no suma a efectivo (cálculos de caja lo excluyen)
+      cajaActiva.ingresos.push({
+        concepto: `Pedido (Crédito) ${venta.numeroVenta}`,
+        monto: total,
+        tipo: 'venta_credito',
+        ventaId: venta._id,
+      });
     }
+
+    await cajaActiva.save();
 
     res.status(201).json(venta);
   } catch (error) {
@@ -211,23 +248,25 @@ const anularVenta = async (req, res) => {
     venta.motivoAnulacion = motivo || 'Sin motivo especificado';
     await venta.save();
 
-    // Revertir stock
+    // Revertir stock (solo productos que controlan stock)
     for (const item of venta.productos) {
       const producto = await Producto.findById(item.productoId);
       if (producto) {
-        const stockAnterior = producto.stock;
-        producto.stock += item.cantidad;
-        await producto.save();
+        if (isControlaStock(producto)) {
+          const stockAnterior = producto.stock;
+          producto.stock += item.cantidad;
+          await producto.save();
 
-        await Kardex.create({
-          productoId: item.productoId,
-          tipo: 'entrada',
-          cantidad: item.cantidad,
-          stockAnterior,
-          stockNuevo: producto.stock,
-          motivo: `Anulación venta ${venta.numeroVenta}`,
-          usuarioId: req.user._id,
-        });
+          await Kardex.create({
+            productoId: item.productoId,
+            tipo: 'entrada',
+            cantidad: item.cantidad,
+            stockAnterior,
+            stockNuevo: producto.stock,
+            motivo: `Anulación venta ${venta.numeroVenta}`,
+            usuarioId: req.user._id,
+          });
+        }
       }
     }
 
@@ -249,15 +288,24 @@ const anularVenta = async (req, res) => {
           await clienteDoc.save();
         }
       }
-    } else if (caja) {
-      // Crear un egreso de reverso en la caja abierta (mantiene auditoría)
-      caja.egresos.push({
-        concepto: `Anulación venta ${venta.numeroVenta}`,
-        monto: venta.total,
-        tipo: 'egreso',
-        ventaId: venta._id,
+    }
+
+    // Quitar el movimiento de ingreso asociado a la venta (venta / venta_credito)
+    // para que NO afecte el cierre ni aparezca en la caja.
+    if (caja) {
+      const before = (caja.ingresos || []).length;
+      caja.ingresos = (caja.ingresos || []).filter((mov) => {
+        const sameVenta = mov?.ventaId && String(mov.ventaId) === String(venta._id);
+        const isVentaMov = mov?.tipo === 'venta' || mov?.tipo === 'venta_credito';
+        return !(sameVenta && isVentaMov);
       });
+      const removed = before - (caja.ingresos || []).length;
       await caja.save();
+
+      // Si por algún motivo no existía el movimiento, no bloqueamos la anulación.
+      if (removed === 0) {
+        console.warn(`[anularVenta] No se encontró movimiento de caja para la venta ${venta._id} (${venta.numeroVenta})`);
+      }
     }
 
     res.json({ mensaje: 'Venta anulada correctamente', venta });

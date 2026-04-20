@@ -1,5 +1,8 @@
 const { Proveedor, Compra } = require('./proveedor.model');
 const { Producto, Kardex } = require('../inventario/producto.model');
+const Caja = require('../caja/caja.model');
+
+const isControlaStock = (producto) => producto?.controlaStock !== false;
 
 const toId = (v) => String(v);
 
@@ -103,6 +106,12 @@ const registrarCompra = async (req, res) => {
   try {
     const { proveedorId, productos, total, numeroFactura, observaciones } = req.body;
 
+    // Caja debe estar abierta para reflejar la salida
+    const cajaActiva = await Caja.findOne({ estado: 'abierta' });
+    if (!cajaActiva) {
+      return res.status(400).json({ mensaje: 'Debe abrir caja antes de registrar compras' });
+    }
+
     const proveedor = await Proveedor.findById(proveedorId);
     if (!proveedor) return res.status(404).json({ mensaje: 'Proveedor no encontrado' });
 
@@ -114,20 +123,28 @@ const registrarCompra = async (req, res) => {
         return res.status(404).json({ mensaje: `Producto ${item.productoId} no encontrado` });
       }
 
-      const stockAnterior = producto.stock;
-      producto.stock += item.cantidad;
-      if (item.precioCompra) producto.precioCompra = item.precioCompra;
-      await producto.save();
+      // Actualizar costo siempre; stock solo si el producto controla stock
+      if (item.precioCompra !== undefined && item.precioCompra !== null) {
+        producto.precioCompra = item.precioCompra;
+      }
 
-      await Kardex.create({
-        productoId: producto._id,
-        tipo: 'entrada',
-        cantidad: item.cantidad,
-        stockAnterior,
-        stockNuevo: producto.stock,
-        motivo: `Compra a ${proveedor.nombre} - Factura: ${numeroFactura || 'N/A'}`,
-        usuarioId: req.user._id,
-      });
+      if (isControlaStock(producto)) {
+        const stockAnterior = producto.stock;
+        producto.stock += item.cantidad;
+        await producto.save();
+
+        await Kardex.create({
+          productoId: producto._id,
+          tipo: 'entrada',
+          cantidad: item.cantidad,
+          stockAnterior,
+          stockNuevo: producto.stock,
+          motivo: `Compra a ${proveedor.nombre} - Factura: ${numeroFactura || 'N/A'}`,
+          usuarioId: req.user._id,
+        });
+      } else {
+        await producto.save();
+      }
 
       productosCompra.push({
         productoId: producto._id,
@@ -145,7 +162,21 @@ const registrarCompra = async (req, res) => {
       numeroFactura,
       observaciones,
       usuarioId: req.user._id,
+      cajaId: cajaActiva._id,
     });
+
+    // Registrar egreso en caja
+    const concepto = `Compra a ${proveedor.nombre} - Factura: ${numeroFactura || 'N/A'} (${compra._id})`;
+    cajaActiva.egresos.push({
+      concepto,
+      monto: Number(total) || 0,
+      tipo: 'egreso',
+    });
+    const egresoMov = cajaActiva.egresos[cajaActiva.egresos.length - 1];
+    await cajaActiva.save();
+
+    compra.egresoId = egresoMov?._id || null;
+    await compra.save();
 
     res.status(201).json({ mensaje: 'Compra registrada correctamente', compra });
   } catch (error) {
@@ -180,6 +211,11 @@ const updateCompra = async (req, res) => {
         return res.status(404).json({ mensaje: `Producto ${productoId} no encontrado` });
       }
 
+      if (!isControlaStock(producto)) {
+        // No valida stock para productos que no controlan stock
+        continue;
+      }
+
       const needed = Math.abs(delta);
       if (producto.stock < needed) {
         return res.status(400).json({
@@ -204,7 +240,9 @@ const updateCompra = async (req, res) => {
       }
 
       const stockAnterior = producto.stock;
-      producto.stock += delta;
+      if (isControlaStock(producto)) {
+        producto.stock += delta;
+      }
 
       const incomingPrecioCompra = newMap.get(productoId)?.precioCompra;
       if (incomingPrecioCompra !== undefined && incomingPrecioCompra !== null) {
@@ -213,15 +251,17 @@ const updateCompra = async (req, res) => {
 
       await producto.save();
 
-      await Kardex.create({
-        productoId: producto._id,
-        tipo: delta > 0 ? 'entrada' : 'ajuste',
-        cantidad: Math.abs(delta),
-        stockAnterior,
-        stockNuevo: producto.stock,
-        motivo,
-        usuarioId: req.user._id,
-      });
+      if (isControlaStock(producto)) {
+        await Kardex.create({
+          productoId: producto._id,
+          tipo: delta > 0 ? 'entrada' : 'ajuste',
+          cantidad: Math.abs(delta),
+          stockAnterior,
+          stockNuevo: producto.stock,
+          motivo,
+          usuarioId: req.user._id,
+        });
+      }
     }
 
     // Reconstruir items de compra y total
@@ -257,6 +297,22 @@ const updateCompra = async (req, res) => {
     if (observaciones !== undefined) compra.observaciones = observaciones;
     await compra.save();
 
+    // Ajustar egreso en caja si existe vínculo
+    if (compra.cajaId && compra.egresoId) {
+      const caja = await Caja.findById(compra.cajaId);
+      if (caja) {
+        const mov = caja.egresos.id(compra.egresoId);
+        if (mov) {
+          const proveedor = await Proveedor.findById(compra.proveedorId);
+          const concepto = `Compra a ${proveedor?.nombre || 'Proveedor'} - Factura: ${compra.numeroFactura || 'N/A'} (${compra._id})`;
+          mov.concepto = concepto;
+          mov.monto = Number(total) || 0;
+          mov.tipo = 'egreso';
+          await caja.save();
+        }
+      }
+    }
+
     res.json({ mensaje: 'Compra actualizada y stock recalculado', compra });
   } catch (error) {
     res.status(500).json({ mensaje: 'Error al actualizar compra', error: error.message });
@@ -273,6 +329,7 @@ const deleteCompra = async (req, res) => {
     for (const item of compra.productos) {
       const producto = await Producto.findById(item.productoId);
       if (!producto) continue;
+      if (!isControlaStock(producto)) continue;
       if (producto.stock < item.cantidad) {
         return res.status(400).json({
           mensaje: `No se puede anular: "${producto.nombre}" tiene stock ${producto.stock} y la compra aportó ${item.cantidad}.`,
@@ -284,6 +341,7 @@ const deleteCompra = async (req, res) => {
     for (const item of compra.productos) {
       const producto = await Producto.findById(item.productoId);
       if (!producto) continue;
+      if (!isControlaStock(producto)) continue;
       const stockAnterior = producto.stock;
       producto.stock -= item.cantidad;
       await producto.save();
@@ -300,6 +358,19 @@ const deleteCompra = async (req, res) => {
     }
 
     await compra.deleteOne();
+
+    // Quitar egreso de caja si existía vínculo
+    if (compra.cajaId && compra.egresoId) {
+      const caja = await Caja.findById(compra.cajaId);
+      if (caja) {
+        const mov = caja.egresos.id(compra.egresoId);
+        if (mov) {
+          mov.deleteOne();
+          await caja.save();
+        }
+      }
+    }
+
     res.json({ mensaje: 'Compra anulada y stock revertido' });
   } catch (error) {
     res.status(500).json({ mensaje: 'Error al anular compra', error: error.message });

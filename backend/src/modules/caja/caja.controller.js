@@ -1,5 +1,38 @@
 const Caja = require('./caja.model');
 
+const toCents = (value) => Math.round((Number(value) || 0) * 100);
+const fromCents = (cents) => Number((Number(cents || 0) / 100).toFixed(2));
+
+const toStartOfDay = (d) => {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+};
+
+const toEndOfDay = (d) => {
+  const x = new Date(d);
+  x.setHours(23, 59, 59, 999);
+  return x;
+};
+
+const isValidDate = (d) => d instanceof Date && !Number.isNaN(d.getTime());
+
+const escapeCsv = (value) => {
+  const s = String(value ?? '');
+  const needsQuotes = /[\n\r,\"]/g.test(s);
+  const escaped = s.replace(/\"/g, '""');
+  return needsQuotes ? `"${escaped}"` : escaped;
+};
+
+const formatIso = (d) => {
+  try {
+    const x = new Date(d);
+    return isValidDate(x) ? x.toISOString() : '';
+  } catch {
+    return '';
+  }
+};
+
 // @POST /api/caja/abrir
 const abrirCaja = async (req, res) => {
   try {
@@ -32,6 +65,14 @@ const cerrarCaja = async (req, res) => {
     const { billetaje = [], observaciones, tipoCambio: tipoCambioInput } = req.body;
     const tipoCambio = Number(tipoCambioInput) || 36.6;
 
+    if (!Array.isArray(billetaje)) {
+      return res.status(400).json({ mensaje: 'Billetaje inválido: se espera un arreglo' });
+    }
+
+    if (!Number.isFinite(tipoCambio) || tipoCambio <= 0) {
+      return res.status(400).json({ mensaje: 'Tipo de cambio inválido' });
+    }
+
     console.log('--- PAYLOAD RECIBIDO ---');
     console.log('Billetaje:', JSON.stringify(billetaje, null, 2));
 
@@ -39,44 +80,59 @@ const cerrarCaja = async (req, res) => {
     if (!caja) return res.status(404).json({ mensaje: 'Caja no encontrada' });
     if (caja.estado === 'cerrada') return res.status(400).json({ mensaje: 'La caja ya está cerrada' });
 
-    // 1. Calcular totales del sistema (NIO)
-    const totalVentas = (caja.ingresos || [])
+    // 1. Calcular totales del sistema (NIO) en centavos para evitar errores de coma flotante
+    const totalVentasCents = (caja.ingresos || [])
       .filter(i => i.tipo === 'venta')
-      .reduce((sum, i) => sum + (Number(i.monto) || 0), 0);
+      .reduce((sum, i) => sum + toCents(i.monto), 0);
 
-    const totalIngresos = (caja.ingresos || [])
+    const totalIngresosCents = (caja.ingresos || [])
       .filter(i => i.tipo === 'ingreso_manual')
-      .reduce((sum, i) => sum + (Number(i.monto) || 0), 0);
+      .reduce((sum, i) => sum + toCents(i.monto), 0);
 
-    const totalEgresos = (caja.egresos || [])
-      .reduce((sum, e) => sum + (Number(e.monto) || 0), 0);
+    const totalEgresosCents = (caja.egresos || [])
+      .reduce((sum, e) => sum + toCents(e.monto), 0);
 
-    const montoFinalSistema = (caja.montoInicial || 0) + totalVentas + totalIngresos - totalEgresos;
+    const montoInicialCents = toCents(caja.montoInicial);
+    const montoFinalSistemaCents = montoInicialCents + totalVentasCents + totalIngresosCents - totalEgresosCents;
+    const montoFinalSistema = fromCents(montoFinalSistemaCents);
+    const totalVentas = fromCents(totalVentasCents);
+    const totalIngresos = fromCents(totalIngresosCents);
+    const totalEgresos = fromCents(totalEgresosCents);
 
-    // 2. Procesar Arqueo Físico (Consolidado en NIO)
-    let montoFisicoConsolidado = 0;
-    const billetajeProcesado = billetaje.map(item => {
+    // 2. Procesar Arqueo Físico (Consolidado en NIO) usando centavos
+    let montoFisicoConsolidadoCents = 0;
+    const billetajeProcesado = billetaje
+      .filter(item => (Number(item?.cantidad) || 0) > 0 && (Number(item?.denominacion) || 0) > 0)
+      .map(item => {
       const denom = Number(item.denominacion) || 0;
       const cant = Number(item.cantidad) || 0;
-      const sub = denom * cant;
-      
+
+      // Normalizar moneda
       const monRaw = String(item.moneda || '').trim().toUpperCase();
       const esUSD = monRaw === 'USD';
       const monedaFinal = esUSD ? 'USD' : 'NIO';
-      
-      // Conversión CRITICA a NIO si es USD
-      const valorConvertidoANIO = esUSD ? (sub * tipoCambio) : sub;
-      
-      montoFisicoConsolidado += valorConvertidoANIO;
+
+      // subtotal en la moneda original (centavos)
+      const denomCents = Math.round(denom * 100);
+      const subCents = denomCents * cant;
+
+      // conversión a NIO (centavos) si corresponde
+      const valorConvertidoANIOCents = esUSD
+        ? Math.round(subCents * tipoCambio)
+        : subCents;
+
+      montoFisicoConsolidadoCents += valorConvertidoANIOCents;
 
       return {
         denominacion: denom,
         cantidad: cant,
-        subtotal: sub,
+        subtotal: fromCents(subCents),
         moneda: monedaFinal,
         tipo: item.tipo || (denom >= 10 ? 'billete' : 'moneda')
       };
     });
+
+    const montoFisicoConsolidado = fromCents(montoFisicoConsolidadoCents);
 
     console.log('Monto Fisico Total (NIO):', montoFisicoConsolidado);
     console.log('Monto Sistema Total (NIO):', montoFinalSistema);
@@ -89,7 +145,10 @@ const cerrarCaja = async (req, res) => {
     caja.totalEgresos = totalEgresos;
     caja.tipoCambio = tipoCambio;
     caja.montoFinal = montoFisicoConsolidado;
-    caja.diferencia = montoFisicoConsolidado - montoFinalSistema;
+    const diferenciaCents = montoFinalSistemaCents < 0
+      ? (montoFisicoConsolidadoCents + montoFinalSistemaCents)
+      : (montoFisicoConsolidadoCents - montoFinalSistemaCents);
+    caja.diferencia = fromCents(diferenciaCents);
     
     // Carga de billetaje usando .set para mayor seguridad en Mongoose
     caja.set('billetaje', billetajeProcesado);
@@ -136,18 +195,33 @@ const getCajaActual = async (req, res) => {
       return res.status(404).json({ mensaje: 'No hay caja abierta actualmente' });
     }
 
-    const totalVentas = caja.ingresos
+    // Totales en centavos (consistentes con el cierre)
+    const totalVentasCents = (caja.ingresos || [])
       .filter((i) => i.tipo === 'venta')
-      .reduce((sum, i) => sum + i.monto, 0);
+      .reduce((sum, i) => sum + toCents(i.monto), 0);
 
-    const totalEgresos = caja.egresos.reduce((sum, e) => sum + e.monto, 0);
+    const totalIngresosCents = (caja.ingresos || [])
+      .filter((i) => i.tipo === 'ingreso_manual')
+      .reduce((sum, i) => sum + toCents(i.monto), 0);
+
+    const totalEgresosCents = (caja.egresos || [])
+      .reduce((sum, e) => sum + toCents(e.monto), 0);
+
+    const montoInicialCents = toCents(caja.montoInicial);
+    const saldoActualCents = montoInicialCents + totalVentasCents + totalIngresosCents - totalEgresosCents;
+
+    const totalVentas = fromCents(totalVentasCents);
+    const totalIngresos = fromCents(totalIngresosCents);
+    const totalEgresos = fromCents(totalEgresosCents);
+    const saldoActual = fromCents(saldoActualCents);
 
     res.json({
       caja,
       resumen: {
         totalVentas,
+        totalIngresos,
         totalEgresos,
-        saldoActual: caja.montoInicial + totalVentas - totalEgresos,
+        saldoActual,
       },
     });
   } catch (error) {
@@ -216,4 +290,125 @@ const getCajaById = async (req, res) => {
   }
 };
 
-module.exports = { abrirCaja, cerrarCaja, getCajaActual, registrarEgreso, getHistorialCaja, getCajaById };
+// @GET /api/caja/transacciones/export?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
+// Exporta en CSV todos los movimientos (ingresos/egresos) dentro del rango.
+const exportTransaccionesCaja = async (req, res) => {
+  try {
+    const { desde, hasta } = req.query;
+
+    if (!desde || !hasta) {
+      return res.status(400).json({ mensaje: 'Debe enviar desde y hasta (YYYY-MM-DD)' });
+    }
+
+    const start = toStartOfDay(new Date(desde));
+    const end = toEndOfDay(new Date(hasta));
+
+    if (!isValidDate(start) || !isValidDate(end) || start > end) {
+      return res.status(400).json({ mensaje: 'Rango de fechas inválido' });
+    }
+
+    // Traemos cajas que se solapan con el rango (para no cargar histórico completo)
+    const cajas = await Caja.find({
+      fechaApertura: { $lte: end },
+      $or: [{ fechaCierre: null }, { fechaCierre: { $gte: start } }],
+    })
+      .populate('usuarioApertura', 'nombre')
+      .lean();
+
+    const rows = [];
+    for (const caja of cajas) {
+      const cajaId = caja?._id;
+      const usuario = caja?.usuarioApertura?.nombre || '';
+      const fechaApertura = caja?.fechaApertura;
+      const fechaCierre = caja?.fechaCierre;
+
+      for (const mov of caja?.ingresos || []) {
+        const fechaMov = mov?.createdAt || mov?.fecha;
+        const f = new Date(fechaMov);
+        if (!isValidDate(f) || f < start || f > end) continue;
+        rows.push({
+          fecha: f,
+          direccion: 'INGRESO',
+          tipo: mov?.tipo || '',
+          concepto: mov?.concepto || '',
+          monto: Number(mov?.monto || 0),
+          ventaId: mov?.ventaId || '',
+          cajaId,
+          usuarioApertura: usuario,
+          cajaFechaApertura: fechaApertura,
+          cajaFechaCierre: fechaCierre,
+        });
+      }
+
+      for (const mov of caja?.egresos || []) {
+        const fechaMov = mov?.createdAt || mov?.fecha;
+        const f = new Date(fechaMov);
+        if (!isValidDate(f) || f < start || f > end) continue;
+        rows.push({
+          fecha: f,
+          direccion: 'EGRESO',
+          tipo: mov?.tipo || 'egreso',
+          concepto: mov?.concepto || '',
+          monto: Number(mov?.monto || 0),
+          ventaId: mov?.ventaId || '',
+          cajaId,
+          usuarioApertura: usuario,
+          cajaFechaApertura: fechaApertura,
+          cajaFechaCierre: fechaCierre,
+        });
+      }
+    }
+
+    rows.sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+
+    const header = [
+      'fecha',
+      'direccion',
+      'tipo',
+      'concepto',
+      'monto',
+      'ventaId',
+      'cajaId',
+      'usuarioApertura',
+      'cajaFechaApertura',
+      'cajaFechaCierre',
+    ].join(',');
+
+    const lines = rows.map((r) =>
+      [
+        formatIso(r.fecha),
+        r.direccion,
+        r.tipo,
+        r.concepto,
+        r.monto,
+        r.ventaId,
+        r.cajaId,
+        r.usuarioApertura,
+        formatIso(r.cajaFechaApertura),
+        formatIso(r.cajaFechaCierre),
+      ]
+        .map(escapeCsv)
+        .join(',')
+    );
+
+    const csv = [header, ...lines].join('\n');
+    const filename = `transacciones_caja_${desde}_a_${hasta}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    // BOM para Excel
+    res.send(`\ufeff${csv}`);
+  } catch (error) {
+    res.status(500).json({ mensaje: 'Error al exportar transacciones', error: error.message });
+  }
+};
+
+module.exports = {
+  abrirCaja,
+  cerrarCaja,
+  getCajaActual,
+  registrarEgreso,
+  getHistorialCaja,
+  getCajaById,
+  exportTransaccionesCaja,
+};

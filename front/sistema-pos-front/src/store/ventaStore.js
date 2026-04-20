@@ -56,7 +56,8 @@ export const useVentaStore = create((set, get) => ({
             cantidad: 1,
             precioUnitario: producto.precioVenta,
             subtotal: producto.precioVenta,
-            stockDisponible: producto.stock,
+            stockDisponible: producto.controlaStock !== false ? producto.stock : null,
+            controlaStock: producto.controlaStock !== false,
           },
         ],
       };

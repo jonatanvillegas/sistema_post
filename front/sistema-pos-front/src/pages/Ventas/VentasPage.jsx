@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Row, Col, Card, Input, Button, Tabs, Table, Typography, 
   Space, Badge, Modal, InputNumber, Radio, Divider, Empty, Tag,
-  Alert, Tooltip, Select
+  Alert, Tooltip, Select, DatePicker
 } from 'antd';
 import { 
   SearchOutlined, PlusOutlined, CloseOutlined, 
@@ -13,7 +13,6 @@ import {
 import { toast } from 'react-hot-toast';
 import { getProductos } from '../../api/inventario.api';
 import { createVenta, getVentas, anularVenta } from '../../api/ventas.api';
-import { getCajaActual } from '../../api/caja.api';
 import { getClientes } from '../../api/clientes.api';
 import { useVentaStore } from '../../store/ventaStore';
 import { useCajaStore } from '../../store/cajaStore';
@@ -28,7 +27,6 @@ const { Option } = Select;
 export default function VentasPage() {
   const [loading, setLoading] = useState(false);
   const [productos, setProductos] = useState([]);
-  const [catalogoProductos, setCatalogoProductos] = useState([]);
   const [busqueda, setBusqueda] = useState('');
   const [isModalPagoVisible, setIsModalPagoVisible] = useState(false);
   const [montoRecibido, setMontoRecibido] = useState(0);
@@ -37,6 +35,12 @@ export default function VentasPage() {
   const [isVentasModalVisible, setIsVentasModalVisible] = useState(false);
   const [ventasRecientesLoading, setVentasRecientesLoading] = useState(false);
   const [ventasRecientes, setVentasRecientes] = useState([]);
+  const [ventasRecientesTotal, setVentasRecientesTotal] = useState(0);
+  const [ventasRecientesPage, setVentasRecientesPage] = useState(1);
+  const [ventasRecientesLimit, setVentasRecientesLimit] = useState(20);
+  const [ventasFiltroBuscar, setVentasFiltroBuscar] = useState('');
+  const [ventasFiltroEstado, setVentasFiltroEstado] = useState(undefined);
+  const [ventasFiltroRango, setVentasFiltroRango] = useState(null);
 
   // Buscador de Clientes
   const [clientesBusqueda, setClientesBusqueda] = useState([]);
@@ -45,39 +49,49 @@ export default function VentasPage() {
   const { 
     pestanas, pestanaActiva, agregarPestana, cerrarPestana, setPestanaActiva,
     agregarProducto, quitarProducto, cambiarCantidad, getPestanaActiva, 
-    getTotal, getSubtotal, limpiarPestana, setCliente, setDescuento, setProductosEnPestana
+    getTotal, getSubtotal, limpiarPestana, setCliente
   } = useVentaStore();
   
   const { cajaActual } = useCajaStore();
   const isAdmin = useAuthStore((s) => s.isAdmin);
   const searchInputRef = useRef(null);
 
-  const cargarCatalogoProductos = async () => {
-    try {
-      const res = await getProductos({ buscar: '', limit: 5000 });
-      const list = Array.isArray(res.data) ? res.data : [];
-      setCatalogoProductos(list);
-      return list;
-    } catch (err) {
-      toast.error(err?.response?.data?.mensaje || 'Error cargando catálogo de productos');
-      return [];
-    }
-  };
+  const loadVentasHistorial = async (next = {}) => {
+    const page = next.page ?? ventasRecientesPage;
+    const limit = next.limit ?? ventasRecientesLimit;
 
-  const openVentasRecientes = async () => {
-    setIsVentasModalVisible(true);
+    const [d0, d1] = Array.isArray(ventasFiltroRango) ? ventasFiltroRango : [];
+    const desde = d0?.format ? d0.format('YYYY-MM-DD') : undefined;
+    const hasta = d1?.format ? d1.format('YYYY-MM-DD') : undefined;
+
     setVentasRecientesLoading(true);
     try {
-      const { data } = await getVentas({ page: 1, limit: 50 });
+      const { data } = await getVentas({
+        page,
+        limit,
+        buscar: ventasFiltroBuscar || undefined,
+        estado: ventasFiltroEstado || undefined,
+        desde,
+        hasta,
+      });
       setVentasRecientes(Array.isArray(data?.ventas) ? data.ventas : []);
+      setVentasRecientesTotal(Number(data?.total) || 0);
+      setVentasRecientesPage(Number(data?.pagina) || page);
+      setVentasRecientesLimit(Number(limit) || 20);
     } catch (err) {
-      toast.error(err?.response?.data?.mensaje || 'Error cargando ventas');
+      toast.error(err?.response?.data?.mensaje || 'Error cargando historial');
     } finally {
       setVentasRecientesLoading(false);
     }
   };
 
-  const corregirVenta = async (venta) => {
+  const openVentasRecientes = async () => {
+    setIsVentasModalVisible(true);
+    setVentasRecientesPage(1);
+    await loadVentasHistorial({ page: 1 });
+  };
+
+  const anularVentaHistorial = async (venta) => {
     if (!venta?._id) return;
     if (!isAdmin()) {
       toast.error('Solo un administrador puede corregir/anular ventas');
@@ -90,16 +104,16 @@ export default function VentasPage() {
 
     let motivoValue = '';
     Modal.confirm({
-      title: `Corregir venta ${venta.numeroVenta}`,
+      title: `Anular venta ${venta.numeroVenta}`,
       content: (
         <div>
           <Paragraph style={{ marginBottom: 8 }}>
-            Se anulará la venta y se cargará en el carrito para volver a facturar con cambios.
+            Se anulará la venta. Solo se permite si la caja donde se registró sigue abierta.
           </Paragraph>
           <Input placeholder="Motivo (obligatorio)" onChange={(e) => (motivoValue = e.target.value)} />
         </div>
       ),
-      okText: 'Anular y cargar',
+      okText: 'Anular',
       okButtonProps: { danger: true },
       cancelText: 'Cancelar',
       onOk: async () => {
@@ -109,37 +123,8 @@ export default function VentasPage() {
         }
 
         await anularVenta(venta._id, { motivo: motivoValue.trim() });
-
-        const catalogo = await cargarCatalogoProductos();
-        const items = Array.isArray(venta?.productos) ? venta.productos : [];
-
-        limpiarPestana();
-        setCliente({
-          nombre: venta?.cliente?.nombre || 'Consumidor Final',
-          nit: venta?.cliente?.nit || 'CF',
-          _id: venta?.clienteId || null,
-        });
-        setDescuento(Number(venta?.descuento) || 0);
-
-        const productosCarrito = items.map((it) => {
-          const p = catalogo.find((x) => String(x._id) === String(it.productoId));
-          const stockDisponible = p?.stock ?? 0;
-          const cantidad = Number(it.cantidad) || 1;
-          const precioUnitario = Number(it.precioUnitario) || 0;
-          return {
-            productoId: it.productoId,
-            nombre: it.nombre,
-            codigo: it.codigo || '',
-            cantidad,
-            precioUnitario,
-            subtotal: cantidad * precioUnitario,
-            stockDisponible,
-          };
-        });
-
-        setProductosEnPestana(productosCarrito);
-        setIsVentasModalVisible(false);
-        toast.success('Venta anulada y cargada en el carrito');
+        toast.success('Venta anulada correctamente');
+        await loadVentasHistorial({ page: ventasRecientesPage });
       },
     });
   };
@@ -274,7 +259,7 @@ export default function VentasPage() {
   };
 
   const handleProductClick = (producto) => {
-    if (producto.stock <= 0) {
+    if (producto?.controlaStock !== false && producto.stock <= 0) {
       toast.error('Producto sin stock disponible');
       return;
     }
@@ -388,7 +373,7 @@ export default function VentasPage() {
       render: (val, record) => (
         <InputNumber 
           min={1} 
-          max={record.stockDisponible}
+          max={record.controlaStock === false ? undefined : record.stockDisponible}
           size="small" 
           value={val} 
           onChange={(v) => cambiarCantidad(record.productoId, v)} 
@@ -463,7 +448,7 @@ export default function VentasPage() {
             {productos.map(p => (
               <div 
                 key={p._id} 
-                className={`pos-product-card ${p.stock <= 0 ? 'sin-stock' : ''}`}
+                className={`pos-product-card ${(p.controlaStock !== false && p.stock <= 0) ? 'sin-stock' : ''}`}
                 onClick={() => handleProductClick(p)}
               >
                 <div className="pos-product-icon">
@@ -472,7 +457,11 @@ export default function VentasPage() {
                 <Text className="pos-product-name">{p.nombre}</Text>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' }}>
                   <Text className="pos-product-price">{formatCurrency(p.precioVenta)}</Text>
-                  <Tag color={p.stock <= 5 ? 'orange' : 'blue'} style={{ fontSize: 10, margin: 0 }}>{p.stock}</Tag>
+                  {p.controlaStock === false ? (
+                    <Tag color="default" style={{ fontSize: 10, margin: 0 }}>N/A</Tag>
+                  ) : (
+                    <Tag color={p.stock <= 5 ? 'orange' : 'blue'} style={{ fontSize: 10, margin: 0 }}>{p.stock}</Tag>
+                  )}
                 </div>
               </div>
             ))}
@@ -568,18 +557,70 @@ export default function VentasPage() {
       </div>
 
       <Modal
-        title="Ventas recientes"
+        title="Historial de pedidos"
         open={isVentasModalVisible}
         onCancel={() => setIsVentasModalVisible(false)}
         footer={null}
         width={900}
         destroyOnClose
       >
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          <Input
+            placeholder="Buscar (VTA-000123 / cliente / NIT)"
+            value={ventasFiltroBuscar}
+            onChange={(e) => setVentasFiltroBuscar(e.target.value)}
+            style={{ width: 260 }}
+            allowClear
+            onPressEnter={() => loadVentasHistorial({ page: 1 })}
+          />
+          <Select
+            placeholder="Estado"
+            value={ventasFiltroEstado}
+            onChange={(v) => setVentasFiltroEstado(v)}
+            style={{ width: 160 }}
+            allowClear
+            options={[
+              { value: 'completada', label: 'Completadas' },
+              { value: 'anulada', label: 'Anuladas' },
+            ]}
+          />
+          <DatePicker.RangePicker
+            value={ventasFiltroRango}
+            onChange={(r) => setVentasFiltroRango(r)}
+            format="YYYY-MM-DD"
+            allowClear
+          />
+          <Button type="primary" onClick={() => loadVentasHistorial({ page: 1 })}>
+            Buscar
+          </Button>
+          <Button
+            onClick={async () => {
+              setVentasFiltroBuscar('');
+              setVentasFiltroEstado(undefined);
+              setVentasFiltroRango(null);
+              setVentasRecientesPage(1);
+              await loadVentasHistorial({ page: 1 });
+            }}
+          >
+            Limpiar
+          </Button>
+        </div>
+
         <Table
           rowKey="_id"
           loading={ventasRecientesLoading}
           dataSource={ventasRecientes}
-          pagination={false}
+          pagination={{
+            current: ventasRecientesPage,
+            pageSize: ventasRecientesLimit,
+            total: ventasRecientesTotal,
+            showSizeChanger: true,
+            onChange: (page, pageSize) => {
+              setVentasRecientesPage(page);
+              setVentasRecientesLimit(pageSize);
+              loadVentasHistorial({ page, limit: pageSize });
+            },
+          }}
           size="middle"
           columns={[
             {
@@ -630,9 +671,9 @@ export default function VentasPage() {
                   size="small"
                   danger
                   disabled={!isAdmin() || r?.estado === 'anulada'}
-                  onClick={() => corregirVenta(r)}
+                  onClick={() => anularVentaHistorial(r)}
                 >
-                  Corregir
+                  Anular
                 </Button>
               ),
             },
@@ -693,7 +734,7 @@ export default function VentasPage() {
               onChange={setMontoRecibido}
               prefix={<DollarOutlined />}
               formatter={val => `C$ ${val}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-              parser={val => val.replace(/\C\$\s?|(,*)/g, '')}
+              parser={val => val.replace(/C\$\s?|(,*)/g, '')}
             />
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 15, padding: '15px', background: vuelto > 0 ? '#f6ffed' : '#f5f5f5', borderRadius: 12, border: '1px solid #d9d9d9' }}>
               <Text strong style={{ fontSize: 20 }}>VUELTO:</Text>

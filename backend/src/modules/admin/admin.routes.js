@@ -11,4 +11,8 @@ router.use(authorizeRoles('admin'));
 // Endpoint para crear backup manual en el escritorio
 router.post('/backup', adminController.crearBackupManual);
 
+// Preview y restore desde carpeta con .bson/.json (mongodump)
+router.post('/backup/preview', adminController.previewRestore);
+router.post('/backup/restore', adminController.restoreFromFolder);
+
 module.exports = router;

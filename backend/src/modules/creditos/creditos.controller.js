@@ -1,7 +1,33 @@
 const Credito = require('./credito.model');
 const Cliente = require('../clientes/cliente.model');
 const Caja = require('../caja/caja.model');
+const Venta = require('../ventas/venta.model');
+const { Producto, Kardex } = require('../inventario/producto.model');
 const mongoose = require('mongoose');
+
+const isControlaStock = (producto) => producto?.controlaStock !== false;
+
+const recalcularSaldoActualCliente = async (clienteId, session) => {
+  const pipeline = [
+    {
+      $match: {
+        clienteId,
+        estado: { $in: ['pendiente', 'vencido'] },
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: '$saldoPendiente' },
+      },
+    },
+  ];
+
+  const query = Credito.aggregate(pipeline);
+  if (session) query.session(session);
+  const agg = await query;
+  return Number(agg?.[0]?.total) || 0;
+};
 
 // @GET /api/creditos/cliente/:clienteId
 const getCreditosByCliente = async (req, res) => {
@@ -24,11 +50,22 @@ const getCreditosByCliente = async (req, res) => {
 const registrarAbono = async (req, res) => {
   try {
     const { monto, metodoPago, comprobante } = req.body;
+
+    const montoNum = Number(monto);
+    if (!Number.isFinite(montoNum) || montoNum <= 0) {
+      return res.status(400).json({ mensaje: 'Monto inválido' });
+    }
+
+    // Nota: Las transacciones requieren Replica Set/Mongos.
+    // En instalaciones locales (standalone) fallan con: "Transaction numbers are only allowed..."
+    // Para compatibilidad total, aquí se ejecuta sin transacciones.
     const credito = await Credito.findById(req.params.id);
 
     if (!credito) return res.status(404).json({ mensaje: 'Crédito no encontrado' });
     if (credito.estado === 'pagado') return res.status(400).json({ mensaje: 'El crédito ya está pagado' });
-    if (monto > credito.saldoPendiente) return res.status(400).json({ mensaje: `El monto excede el saldo pendiente (${credito.saldoPendiente})` });
+    if (montoNum > credito.saldoPendiente) {
+      return res.status(400).json({ mensaje: `El monto excede el saldo pendiente (${credito.saldoPendiente})` });
+    }
 
     // 1. Verificar si hay caja abierta
     const cajaActiva = await Caja.findOne({ estado: 'abierta' });
@@ -36,7 +73,7 @@ const registrarAbono = async (req, res) => {
 
     // 2. Registrar el abono en el arreglo
     credito.abonos.push({
-      monto,
+      monto: montoNum,
       metodoPago,
       comprobante,
       usuarioId: req.user._id,
@@ -46,16 +83,17 @@ const registrarAbono = async (req, res) => {
     // 3. Guardar el crédito
     await credito.save();
 
-    // 4. Actualizar el saldoActual del Cliente
+    // 4. Recalcular y sincronizar deuda del cliente (evita desfases)
+    const saldoActualRecalculado = await recalcularSaldoActualCliente(credito.clienteId, null);
     await Cliente.findByIdAndUpdate(
       credito.clienteId,
-      { $inc: { saldoActual: -monto } }
+      { $set: { saldoActual: saldoActualRecalculado } }
     );
 
     // 5. Registrar el movimiento de ingreso en la caja
     cajaActiva.ingresos.push({
       concepto: `Abono a Crédito - Venta: ${req.body.numeroVenta || 'C-' + req.params.id.slice(-5)}`,
-      monto,
+      monto: montoNum,
       tipo: 'ingreso_manual',
       fecha: new Date(),
     });
@@ -64,6 +102,12 @@ const registrarAbono = async (req, res) => {
 
     res.json({ mensaje: 'Abono registrado con éxito', credito });
   } catch (error) {
+    try {
+      // Importante para depuración en Electron: stderr queda en main.log
+      console.error('Error al registrar abono:', error);
+    } catch (_) {
+      // noop
+    }
     res.status(500).json({ mensaje: 'Error al registrar abono', error: error.message });
   }
 };
@@ -82,8 +126,259 @@ const getCreditosPendientes = async (req, res) => {
   }
 };
 
+// @GET /api/creditos/:id/detalle
+const getCreditoDetalle = async (req, res) => {
+  try {
+    const credito = await Credito.findById(req.params.id)
+      .populate('clienteId', 'nombre nit telefono')
+      .populate({
+        path: 'ventaId',
+        populate: { path: 'usuarioId', select: 'nombre rol' },
+      });
+
+    if (!credito) return res.status(404).json({ mensaje: 'Crédito no encontrado' });
+    res.json(credito);
+  } catch (error) {
+    res.status(500).json({ mensaje: 'Error al obtener detalle del crédito', error: error.message });
+  }
+};
+
+// @PUT /api/creditos/:id/venta  (solo Admin)
+// Body: { productos: [{ productoId, cantidad, precioUnitario? }] }
+const updateCreditoVentaProductos = async (req, res) => {
+  try {
+    const { productos } = req.body;
+
+    if (!Array.isArray(productos) || productos.length === 0) {
+      return res.status(400).json({ mensaje: 'Debe enviar al menos un producto' });
+    }
+
+    const credito = await Credito.findById(req.params.id);
+    if (!credito) return res.status(404).json({ mensaje: 'Crédito no encontrado' });
+
+    if (credito.estado === 'anulado') {
+      return res.status(400).json({ mensaje: 'No se puede modificar un crédito anulado' });
+    }
+
+    const abonosCount = credito?.abonos?.length || 0;
+    if (abonosCount > 0) {
+      return res.status(400).json({
+        mensaje: 'No se puede modificar la venta de un crédito que ya tiene abonos',
+      });
+    }
+
+    const venta = await Venta.findById(credito.ventaId);
+    if (!venta) return res.status(404).json({ mensaje: 'Venta asociada no encontrada' });
+
+    if (venta.estado === 'anulada') {
+      return res.status(400).json({ mensaje: 'No se puede modificar una venta anulada' });
+    }
+
+    if (venta.metodoPago !== 'credito') {
+      return res.status(400).json({ mensaje: 'Esta venta no es al crédito' });
+    }
+
+    let caja = null;
+    if (venta.cajaId) {
+      caja = await Caja.findById(venta.cajaId);
+      if (caja && caja.estado === 'cerrada') {
+        return res.status(400).json({ mensaje: 'No se puede modificar una venta de una caja cerrada' });
+      }
+    }
+
+    // Normalizar y validar payload
+    const productosInput = productos.map((p) => ({
+      productoId: p?.productoId,
+      cantidad: Number(p?.cantidad),
+      precioUnitario: p?.precioUnitario === undefined || p?.precioUnitario === null ? null : Number(p?.precioUnitario),
+    }));
+
+    // Validar que no existan precios distintos para el mismo producto en la misma edición
+    const precioByProductoId = new Map();
+
+    for (const item of productosInput) {
+      if (!item.productoId) {
+        return res.status(400).json({ mensaje: 'Producto inválido en la venta' });
+      }
+      if (!Number.isFinite(item.cantidad) || item.cantidad <= 0) {
+        return res.status(400).json({ mensaje: 'Cantidad inválida en la venta' });
+      }
+      if (item.precioUnitario !== null && (!Number.isFinite(item.precioUnitario) || item.precioUnitario <= 0)) {
+        return res.status(400).json({ mensaje: 'Precio unitario inválido en la venta' });
+      }
+
+      if (item.precioUnitario !== null) {
+        const key = String(item.productoId);
+        const prev = precioByProductoId.get(key);
+        if (prev !== undefined && prev !== item.precioUnitario) {
+          return res.status(400).json({
+            mensaje: 'No se permite enviar el mismo producto con precios distintos en una sola edición',
+          });
+        }
+        precioByProductoId.set(key, item.precioUnitario);
+      }
+    }
+
+    // Calcular cantidades por producto (para ajuste de stock por delta)
+    const oldQtyById = new Map();
+    for (const item of venta.productos || []) {
+      const key = String(item.productoId);
+      oldQtyById.set(key, (oldQtyById.get(key) || 0) + Number(item.cantidad || 0));
+    }
+
+    const newQtyById = new Map();
+    for (const item of productosInput) {
+      const key = String(item.productoId);
+      newQtyById.set(key, (newQtyById.get(key) || 0) + Number(item.cantidad || 0));
+    }
+
+    const allIds = Array.from(new Set([...oldQtyById.keys(), ...newQtyById.keys()]));
+    const productosDocs = await Producto.find({ _id: { $in: allIds } });
+    const productoDocById = new Map(productosDocs.map((p) => [String(p._id), p]));
+
+    for (const id of allIds) {
+      if (!productoDocById.has(String(id))) {
+        return res.status(404).json({ mensaje: `Producto no encontrado: ${id}` });
+      }
+    }
+
+    // Verificar stock disponible para deltas positivos
+    for (const id of allIds) {
+      const oldQty = oldQtyById.get(id) || 0;
+      const newQty = newQtyById.get(id) || 0;
+      const delta = newQty - oldQty;
+      if (delta > 0) {
+        const prodDoc = productoDocById.get(id);
+        if (isControlaStock(prodDoc) && (Number(prodDoc.stock) || 0) < delta) {
+          return res.status(400).json({
+            mensaje: `Stock insuficiente para "${prodDoc.nombre}". Requiere +${delta}, disponible: ${prodDoc.stock}`,
+          });
+        }
+      }
+    }
+
+    // Aplicar deltas de stock + Kardex
+    for (const id of allIds) {
+      const oldQty = oldQtyById.get(id) || 0;
+      const newQty = newQtyById.get(id) || 0;
+      const delta = newQty - oldQty;
+      if (delta === 0) continue;
+
+      const prodDoc = productoDocById.get(id);
+      if (!isControlaStock(prodDoc)) continue;
+
+      const stockAnterior = Number(prodDoc.stock) || 0;
+      if (delta > 0) {
+        prodDoc.stock = stockAnterior - delta;
+        await prodDoc.save();
+        await Kardex.create({
+          productoId: prodDoc._id,
+          tipo: 'salida',
+          cantidad: delta,
+          stockAnterior,
+          stockNuevo: prodDoc.stock,
+          motivo: `Ajuste venta ${venta.numeroVenta}`,
+          usuarioId: req.user._id,
+        });
+      } else {
+        const qtyReturn = Math.abs(delta);
+        prodDoc.stock = stockAnterior + qtyReturn;
+        await prodDoc.save();
+        await Kardex.create({
+          productoId: prodDoc._id,
+          tipo: 'entrada',
+          cantidad: qtyReturn,
+          stockAnterior,
+          stockNuevo: prodDoc.stock,
+          motivo: `Ajuste venta ${venta.numeroVenta}`,
+          usuarioId: req.user._id,
+        });
+      }
+    }
+
+    // Actualizar precio de venta del inventario (precioVenta) si el admin lo cambió
+    for (const [id, nuevoPrecio] of precioByProductoId.entries()) {
+      const prodDoc = productoDocById.get(String(id));
+      if (!prodDoc) continue;
+      if (Number(prodDoc.precioVenta) !== Number(nuevoPrecio)) {
+        prodDoc.precioVenta = Number(nuevoPrecio);
+        await prodDoc.save();
+      }
+    }
+
+    // Reconstruir items de venta y recalcular totales
+    let subtotal = 0;
+    const productosVenta = [];
+
+    for (const item of productosInput) {
+      const prodDoc = productoDocById.get(String(item.productoId));
+      const precioUnitario = item.precioUnitario !== null ? item.precioUnitario : Number(prodDoc.precioVenta);
+
+      const itemSubtotal = precioUnitario * item.cantidad;
+      subtotal += itemSubtotal;
+
+      productosVenta.push({
+        productoId: prodDoc._id,
+        nombre: prodDoc.nombre,
+        codigo: prodDoc.codigo || '',
+        cantidad: item.cantidad,
+        precioUnitario,
+        subtotal: itemSubtotal,
+      });
+    }
+
+    const descuento = Number(venta.descuento) || 0;
+    const total = subtotal - descuento;
+    if (total < 0) {
+      return res.status(400).json({ mensaje: 'El descuento excede el subtotal; ajuste el descuento antes' });
+    }
+
+    venta.productos = productosVenta;
+    venta.subtotal = subtotal;
+    venta.total = total;
+    await venta.save();
+
+    credito.montoTotal = total;
+    await credito.save();
+
+    // Sincronizar saldoActual del cliente con agregación (evita desfases)
+    const saldoActualRecalculado = await recalcularSaldoActualCliente(credito.clienteId, null);
+    await Cliente.findByIdAndUpdate(
+      credito.clienteId,
+      { $set: { saldoActual: saldoActualRecalculado } }
+    );
+
+    // Actualizar el movimiento en caja (si existe)
+    if (caja) {
+      const movimiento = (caja.ingresos || []).find((m) => String(m.ventaId) === String(venta._id));
+      if (movimiento) {
+        movimiento.monto = total;
+      }
+      await caja.save();
+    }
+
+    const creditoActualizado = await Credito.findById(credito._id)
+      .populate('clienteId', 'nombre nit telefono')
+      .populate({
+        path: 'ventaId',
+        populate: { path: 'usuarioId', select: 'nombre rol' },
+      });
+
+    res.json({ mensaje: 'Venta del crédito actualizada', credito: creditoActualizado });
+  } catch (error) {
+    try {
+      console.error('Error al actualizar venta de crédito:', error);
+    } catch (_) {
+      // noop
+    }
+    res.status(500).json({ mensaje: 'Error al actualizar venta del crédito', error: error.message });
+  }
+};
+
 module.exports = {
   getCreditosByCliente,
   registrarAbono,
   getCreditosPendientes,
+  getCreditoDetalle,
+  updateCreditoVentaProductos,
 };

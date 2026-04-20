@@ -1,5 +1,7 @@
 const { Producto, Kardex } = require('./producto.model');
 
+const isControlaStock = (producto) => producto?.controlaStock !== false;
+
 // @GET /api/inventario
 const getProductos = async (req, res) => {
   try {
@@ -13,7 +15,11 @@ const getProductos = async (req, res) => {
       ];
     }
     if (categoria) filtro.categoria = categoria;
-    if (stockBajo === 'true') filtro.$expr = { $lte: ['$stock', '$stockMinimo'] };
+    if (stockBajo === 'true') {
+      // Excluir productos que no controlan stock
+      filtro.controlaStock = { $ne: false };
+      filtro.$expr = { $lte: ['$stock', '$stockMinimo'] };
+    }
 
     const productos = await Producto.find(filtro)
       .populate('proveedorId', 'nombre')
@@ -30,6 +36,7 @@ const getStockBajo = async (req, res) => {
   try {
     const productos = await Producto.find({
       estado: true,
+      controlaStock: { $ne: false },
       $expr: { $lte: ['$stock', '$stockMinimo'] },
     }).sort({ stock: 1 });
 
@@ -53,10 +60,16 @@ const getProductoById = async (req, res) => {
 // @POST /api/inventario
 const createProducto = async (req, res) => {
   try {
-    const producto = await Producto.create(req.body);
+    const payload = { ...req.body };
+    if (payload.controlaStock === false) {
+      payload.stock = 0;
+      payload.stockMinimo = 0;
+    }
+
+    const producto = await Producto.create(payload);
 
     // Registrar en kardex como entrada inicial
-    if (producto.stock > 0) {
+    if (isControlaStock(producto) && producto.stock > 0) {
       await Kardex.create({
         productoId: producto._id,
         tipo: 'entrada',
@@ -82,11 +95,17 @@ const updateProducto = async (req, res) => {
 
     const stockAnterior = producto.stock;
 
-    Object.assign(producto, req.body);
+    const incoming = { ...req.body };
+    if (incoming.controlaStock === false) {
+      incoming.stock = 0;
+      incoming.stockMinimo = 0;
+    }
+
+    Object.assign(producto, incoming);
     await producto.save();
 
     // Si cambió el stock, registrar en kardex
-    if (req.body.stock !== undefined && req.body.stock !== stockAnterior) {
+    if (isControlaStock(producto) && req.body.stock !== undefined && req.body.stock !== stockAnterior) {
       const diferencia = producto.stock - stockAnterior;
       await Kardex.create({
         productoId: producto._id,

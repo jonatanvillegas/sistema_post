@@ -39,6 +39,10 @@ const compraSchema = new mongoose.Schema(
     fecha: { type: Date, default: Date.now },
     usuarioId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     observaciones: { type: String, default: '' },
+
+    // Caja: egreso registrado por esta compra (si existía caja abierta)
+    cajaId: { type: mongoose.Schema.Types.ObjectId, ref: 'Caja', default: null },
+    egresoId: { type: mongoose.Schema.Types.ObjectId, default: null },
   },
   { timestamps: true }
 );

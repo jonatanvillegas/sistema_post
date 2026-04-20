@@ -1,6 +1,8 @@
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
+const path = require('path');
+const fs = require('fs');
 
 // Rutas
 const authRoutes = require('./modules/auth/auth.routes');
@@ -39,6 +41,21 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/clientes', clientesRoutes);
 app.use('/api/creditos', creditosRoutes);
 app.use('/api/admin', adminRoutes);
+
+// Servir frontend (build Vite) si existe.
+// Esto permite desplegar en un solo servicio (Coolify) con UI + API en el mismo dominio.
+const frontDistPath = path.join(__dirname, '..', '..', 'front', 'sistema-pos-front', 'dist');
+const frontIndexPath = path.join(frontDistPath, 'index.html');
+const hasFrontend = fs.existsSync(frontIndexPath);
+
+if (hasFrontend) {
+  app.use(express.static(frontDistPath));
+
+  // Fallback SPA: cualquier ruta que NO sea /api/* sirve index.html
+  app.get(/^\/(?!api\/).*/, (_req, res) => {
+    res.sendFile(frontIndexPath);
+  });
+}
 
 // Manejo de rutas no encontradas
 app.use((req, res) => {

@@ -1,4 +1,18 @@
 const Cliente = require('./cliente.model');
+const Credito = require('../creditos/credito.model');
+const mongoose = require('mongoose');
+
+const recalcularSaldoActualCliente = async (clienteId) => {
+  if (!clienteId) return 0;
+  const objId = typeof clienteId === 'string' ? new mongoose.Types.ObjectId(clienteId) : clienteId;
+
+  const agg = await Credito.aggregate([
+    { $match: { clienteId: objId, estado: { $in: ['pendiente', 'vencido'] } } },
+    { $group: { _id: null, total: { $sum: '$saldoPendiente' } } },
+  ]);
+
+  return Number(agg?.[0]?.total) || 0;
+};
 
 // @GET /api/clientes
 const getClientes = async (req, res) => {
@@ -23,6 +37,15 @@ const getClienteById = async (req, res) => {
   try {
     const cliente = await Cliente.findById(req.params.id);
     if (!cliente) return res.status(404).json({ mensaje: 'Cliente no encontrado' });
+
+    // Sincronizar deuda real por si existe desfase histórico
+    const saldoActualRecalculado = await recalcularSaldoActualCliente(cliente._id);
+    const saldoActualActual = Number(cliente.saldoActual) || 0;
+    if (Math.abs(saldoActualActual - saldoActualRecalculado) > 0.0001) {
+      cliente.saldoActual = saldoActualRecalculado;
+      await cliente.save();
+    }
+
     res.json(cliente);
   } catch (error) {
     res.status(500).json({ mensaje: 'Error al obtener cliente', error: error.message });

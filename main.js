@@ -1,4 +1,4 @@
-const { app, BrowserWindow, globalShortcut, ipcMain } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, dialog } = require('electron');
 const path = require('path');
 const { fork } = require('child_process');
 const fs = require('fs');
@@ -70,11 +70,12 @@ function waitForBackendReady({ url, timeoutMs }) {
 }
 
 function createWindow() {
+  const isDev = !app.isPackaged;
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
-    fullscreen: true, // Pantalla completa
-    kiosk: true,      // Modo kiosko (sin botones de cerrar/minimizar directos)
+    fullscreen: !isDev, // Pantalla completa solo en producción
+    kiosk: !isDev,      // Modo kiosko solo en producción
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -145,7 +146,7 @@ function createWindow() {
   }
 
   // Abrir DevTools solo si no está empaquetado (evita kiosko en producción)
-  if (!app.isPackaged) {
+  if (isDev) {
     mainWindow.webContents.openDevTools();
   }
 
@@ -293,11 +294,27 @@ app.whenReady().then(() => {
     }
   });
 
-  // Registrar atajo para cerrar la app con Esc (Útil para depuración/kiosko)
-  globalShortcut.register('Escape', () => {
-    log('INFO', 'Atajo Esc detectado - Cerrando aplicación');
-    app.quit();
+  ipcMain.handle('select-backup-folder', async () => {
+    try {
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: 'Seleccionar carpeta de respaldo (contiene .bson/.json)',
+        properties: ['openDirectory'],
+      });
+      if (result.canceled || !result.filePaths?.[0]) return { ok: true, canceled: true };
+      return { ok: true, canceled: false, folderPath: result.filePaths[0] };
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
   });
+
+  // Registrar atajo para cerrar la app con Esc SOLO en producción (kiosko)
+  // En desarrollo es muy fácil presionarlo y parecerá “pantalla en blanco”.
+  if (app.isPackaged) {
+    globalShortcut.register('Escape', () => {
+      log('INFO', 'Atajo Esc detectado - Cerrando aplicación');
+      app.quit();
+    });
+  }
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

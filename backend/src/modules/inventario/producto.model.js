@@ -37,6 +37,10 @@ const productoSchema = new mongoose.Schema(
       type: Number,
       default: 5,
     },
+    controlaStock: {
+      type: Boolean,
+      default: true,
+    },
     categoria: {
       type: String,
       trim: true,

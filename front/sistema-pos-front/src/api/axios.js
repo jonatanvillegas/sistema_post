@@ -1,10 +1,23 @@
 import axios from 'axios';
 import { useAuthStore } from '../store/authStore';
 
+const isFileProtocol = () => {
+  try {
+    return typeof window !== 'undefined' && window.location?.protocol === 'file:';
+  } catch {
+    return false;
+  }
+};
+
 const api = axios.create({
-  // En Electron o producción se puede usar la URL completa, en dev se usa el proxy /api
-  // En Electron o producción usamos la URL absoluta (ajustada para localhost:5000)
-  baseURL: import.meta.env.PROD ? 'http://localhost:5000/api' : '/api',
+  // DEV: proxy de Vite → /api
+  // PROD (Web): usa VITE_API_URL si existe, si no /api (mismo dominio)
+  // PROD (Electron/file://): backend embebido en localhost:5000
+  baseURL: import.meta.env.DEV
+    ? '/api'
+    : isFileProtocol()
+      ? 'http://localhost:5000/api'
+      : (import.meta.env.VITE_API_URL || '/api'),
   headers: { 'Content-Type': 'application/json' },
 });
 

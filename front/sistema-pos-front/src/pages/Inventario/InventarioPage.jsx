@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Table, Card, Button, Input, Space, Typography, Tag, 
-  Modal, Form, InputNumber, Select, Descriptions, Divider, Popconfirm, Badge, Row, Col
+  Modal, Form, InputNumber, Select, Descriptions, Divider, Popconfirm, Badge, Row, Col, Switch
 } from 'antd';
 import { 
   PlusOutlined, SearchOutlined, EditOutlined, 
@@ -31,6 +31,20 @@ export default function InventarioPage() {
   const [editingProducto, setEditingProducto] = useState(null);
   const [form] = Form.useForm();
   const { isAdmin } = useAuthStore();
+
+  const lastAutoPrecioCompraRef = useRef(null);
+
+  const calcPrecioCompraFromVentaMargen = (precioVenta, margenPct) => {
+    const pv = Number(precioVenta);
+    const m = Number(margenPct);
+    if (!isFinite(pv) || !isFinite(m)) return null;
+    if (pv < 0) return null;
+    // margen sobre precio de venta (utilidad bruta): compra = venta * (1 - margen%)
+    const pc = pv * (1 - (m / 100));
+    if (!isFinite(pc) || pc < 0) return null;
+    // Redondear a 2 decimales
+    return Math.round(pc * 100) / 100;
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -117,7 +131,10 @@ export default function InventarioPage() {
   const handleOpenModal = (producto = null) => {
     setEditingProducto(producto);
     if (producto) {
-      form.setFieldsValue(producto);
+      form.setFieldsValue({
+        ...producto,
+        controlaStock: producto.controlaStock !== false,
+      });
     } else {
       form.resetFields();
       // Si hay algo en la búsqueda que parece código, pre-llenarlo
@@ -127,6 +144,7 @@ export default function InventarioPage() {
         stockMinimo: 5, 
         precioCompra: 0, 
         precioVenta: 0,
+        controlaStock: true,
         codigo: looksLikeCode ? busqueda : ''
       });
     }
@@ -135,11 +153,13 @@ export default function InventarioPage() {
 
   const onFinish = async (values) => {
     try {
+      const payload = { ...values };
+      delete payload.margenGanancia;
       if (editingProducto) {
-        await updateProducto(editingProducto._id, values);
+        await updateProducto(editingProducto._id, payload);
         toast.success('Producto actualizado');
       } else {
-        await createProducto(values);
+        await createProducto(payload);
         toast.success('Producto creado');
       }
       setIsModalVisible(false);
@@ -206,7 +226,9 @@ export default function InventarioPage() {
     {
       title: 'Stock',
       dataIndex: 'stock',
-      render: (val, record) => <StockBadge stock={val} stockMinimo={record.stockMinimo} />
+      render: (val, record) => (
+        <StockBadge stock={val} stockMinimo={record.stockMinimo} controlaStock={record.controlaStock} />
+      )
     },
     {
       title: 'Acciones',
@@ -296,10 +318,10 @@ export default function InventarioPage() {
             </Col>
             <Col span={8}>
               <Form.Item name="precioCompra" label="Precio Compra" rules={[{ required: true }]}>
-                <InputNumber 
-                  style={{ width: '100%' }} 
-                  min={0} 
-                  step={0.01} 
+                <InputNumber
+                  style={{ width: '100%' }}
+                  min={0}
+                  step={0.01}
                   formatter={val => `C$ ${val}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
                   parser={val => val.replace(/\C\$\s?|(,*)/g, '')}
                 />
@@ -307,15 +329,57 @@ export default function InventarioPage() {
             </Col>
             <Col span={8}>
               <Form.Item name="precioVenta" label="Precio Venta" rules={[{ required: true }]}>
-                <InputNumber 
-                  style={{ width: '100%' }} 
-                  min={0} 
-                  step={0.01} 
+                <InputNumber
+                  style={{ width: '100%' }}
+                  min={0}
+                  step={0.01}
                   formatter={val => `C$ ${val}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
                   parser={val => val.replace(/\C\$\s?|(,*)/g, '')}
                 />
               </Form.Item>
             </Col>
+            <Col span={8}>
+              <Form.Item
+                name="margenGanancia"
+                label="Margen (%)"
+                tooltip="Calcula el Precio Compra usando: compra = venta * (1 - margen/100). Ej: venta 100, margen 30 => compra 70."
+              >
+                <InputNumber style={{ width: '100%' }} min={0} max={99.99} step={0.1} />
+              </Form.Item>
+            </Col>
+
+            <Form.Item noStyle shouldUpdate={(prev, cur) => (
+              prev.precioVenta !== cur.precioVenta ||
+              prev.margenGanancia !== cur.margenGanancia ||
+              prev.precioCompra !== cur.precioCompra
+            )}>
+              {({ getFieldValue, setFieldsValue }) => {
+                const pv = getFieldValue('precioVenta');
+                const margen = getFieldValue('margenGanancia');
+                const currentPc = getFieldValue('precioCompra');
+                const nextPc = calcPrecioCompraFromVentaMargen(pv, margen);
+
+                // Solo autocalcular si:
+                // - hay pv y margen
+                // - y el usuario no ha sobreescrito manualmente (precioCompra coincide con el último autocalculado, o está vacío/0)
+                if (nextPc !== null) {
+                  const lastAuto = lastAutoPrecioCompraRef.current;
+                  const currentNum = currentPc === undefined || currentPc === null || currentPc === '' ? null : Number(currentPc);
+
+                  const isEmptyOrZero = currentNum === null || !isFinite(currentNum) || currentNum === 0;
+                  const matchesLastAuto = lastAuto !== null && isFinite(currentNum) && Number(currentNum) === Number(lastAuto);
+
+                  if (isEmptyOrZero || matchesLastAuto) {
+                    if (currentNum !== nextPc) {
+                      lastAutoPrecioCompraRef.current = nextPc;
+                      setFieldsValue({ precioCompra: nextPc });
+                    }
+                  }
+                }
+
+                return null;
+              }}
+            </Form.Item>
             <Col span={8}>
               <Form.Item name="categoria" label="Categoría" initialValue="General">
                 <Select>
@@ -327,16 +391,45 @@ export default function InventarioPage() {
                 </Select>
               </Form.Item>
             </Col>
+
             <Col span={8}>
-              <Form.Item name="stock" label="Stock Inicial" rules={[{ required: true }]}>
-                <InputNumber style={{ width: '100%' }} min={0} />
+              <Form.Item
+                name="controlaStock"
+                label="Control de Stock"
+                valuePropName="checked"
+                tooltip="Si está apagado, el producto se puede vender sin afectar inventario (ej: café, sándwich)."
+              >
+                <Switch checkedChildren="Sí" unCheckedChildren="No" />
               </Form.Item>
             </Col>
-            <Col span={8}>
-              <Form.Item name="stockMinimo" label="Stock Mínimo" initialValue={5}>
-                <InputNumber style={{ width: '100%' }} min={0} />
-              </Form.Item>
-            </Col>
+
+            <Form.Item noStyle shouldUpdate={(prev, cur) => prev.controlaStock !== cur.controlaStock}>
+              {({ getFieldValue, setFieldsValue }) => {
+                const controlaStock = getFieldValue('controlaStock') !== false;
+                if (!controlaStock) {
+                  const s = getFieldValue('stock');
+                  const sm = getFieldValue('stockMinimo');
+                  if (Number(s) !== 0 || Number(sm) !== 0) {
+                    setFieldsValue({ stock: 0, stockMinimo: 0 });
+                  }
+                }
+
+                return (
+                  <>
+                    <Col span={8}>
+                      <Form.Item name="stock" label="Stock Inicial" rules={[{ required: true }]}>
+                        <InputNumber style={{ width: '100%' }} min={0} disabled={!controlaStock} />
+                      </Form.Item>
+                    </Col>
+                    <Col span={8}>
+                      <Form.Item name="stockMinimo" label="Stock Mínimo" initialValue={5}>
+                        <InputNumber style={{ width: '100%' }} min={0} disabled={!controlaStock} />
+                      </Form.Item>
+                    </Col>
+                  </>
+                );
+              }}
+            </Form.Item>
             <Col span={8}>
               <Form.Item name="proveedorId" label="Proveedor">
                 <Select placeholder="Seleccione..." allowClear>

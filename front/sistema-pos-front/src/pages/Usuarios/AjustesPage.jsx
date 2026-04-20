@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Card, Typography, Button, Space, Divider, Alert, message, List, Tag, Row, Col, Form, Select, Switch, Input, InputNumber } from 'antd';
+import { Card, Typography, Button, Space, Divider, Alert, message, List, Tag, Row, Col, Form, Select, Switch, Input, InputNumber, Table, Modal } from 'antd';
 import { 
   CloudDownloadOutlined, 
   SafetyCertificateOutlined, 
@@ -10,6 +10,7 @@ import {
   PrinterOutlined
 } from '@ant-design/icons';
 import { crearBackup } from '../../api/admin.api';
+import { previewRestore, restoreFromFolder } from '../../api/admin.api';
 import { getPrintSettings, setPrintSettings } from '../../utils/printSettings';
 
 const { Title, Text, Paragraph } = Typography;
@@ -18,6 +19,12 @@ export default function AjustesPage() {
   const [loading, setLoading] = useState(false);
   const [lastBackup, setLastBackup] = useState(null);
   const [formPrint] = Form.useForm();
+
+  const [restoreFolder, setRestoreFolder] = useState('');
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [restoreLoading, setRestoreLoading] = useState(false);
+  const [previewData, setPreviewData] = useState(null);
+  const [confirmRestoreText, setConfirmRestoreText] = useState('');
 
   const initialPrint = getPrintSettings();
 
@@ -41,6 +48,86 @@ export default function AjustesPage() {
       setLoading(false);
       hide();
     }
+  };
+
+  const handleSelectFolder = async () => {
+    try {
+      if (window?.electronAPI?.selectBackupFolder) {
+        const r = await window.electronAPI.selectBackupFolder();
+        if (r?.ok === false) {
+          message.error(r.error || 'No se pudo abrir el selector de carpeta');
+          return;
+        }
+        if (r?.canceled) return;
+        if (r?.folderPath) {
+          setRestoreFolder(r.folderPath);
+          setPreviewData(null);
+          setConfirmRestoreText('');
+        }
+        return;
+      }
+
+      message.info('Escriba o pegue la ruta de la carpeta de respaldo.');
+    } catch (err) {
+      message.error(err?.message || 'Error seleccionando carpeta');
+    }
+  };
+
+  const handlePreviewRestore = async () => {
+    if (!restoreFolder) {
+      message.error('Seleccione la carpeta del respaldo');
+      return;
+    }
+    setPreviewLoading(true);
+    try {
+      const res = await previewRestore(restoreFolder);
+      setPreviewData(res.data);
+      message.success('Previsualización cargada');
+    } catch (err) {
+      setPreviewData(null);
+      message.error(err.response?.data?.mensaje || 'No se pudo previsualizar el respaldo');
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleRestoreNow = async () => {
+    if (!previewData?.ok) {
+      message.error('Primero previsualice el respaldo');
+      return;
+    }
+    if (confirmRestoreText !== 'RESTAURAR') {
+      message.error('Debe escribir RESTAURAR para confirmar');
+      return;
+    }
+
+    Modal.confirm({
+      title: 'Restaurar respaldo (acción destructiva)',
+      content: (
+        <div>
+          <p>
+            Esta acción eliminará la información actual y la reemplazará con el respaldo seleccionado.
+          </p>
+          <p style={{ marginBottom: 0 }}>
+            Carpeta: <b>{restoreFolder}</b>
+          </p>
+        </div>
+      ),
+      okText: 'Restaurar',
+      okButtonProps: { danger: true },
+      cancelText: 'Cancelar',
+      onOk: async () => {
+        setRestoreLoading(true);
+        try {
+          await restoreFromFolder(restoreFolder, confirmRestoreText);
+          message.success('Restauración completada. Recomendado reiniciar el sistema POS.');
+        } catch (err) {
+          message.error(err.response?.data?.mensaje || 'No se pudo restaurar el respaldo');
+        } finally {
+          setRestoreLoading(false);
+        }
+      },
+    });
   };
 
   return (
@@ -124,6 +211,116 @@ export default function AjustesPage() {
               </div>
             </Col>
           </Row>
+        </Card>
+
+        {/* Restauración de respaldo */}
+        <Card
+          title={<Space><SafetyCertificateOutlined style={{ color: '#ef4444' }} /> Restaurar Respaldo</Space>}
+          className="dashboard-card"
+        >
+          <Alert
+            type="warning"
+            showIcon
+            message="Advertencia"
+            description="Restaurar un respaldo borra la información actual y la reemplaza por la del respaldo. Use esta función con cuidado."
+            style={{ marginBottom: 16, borderRadius: 12 }}
+          />
+
+          <Row gutter={[16, 16]} align="middle">
+            <Col xs={24} md={16}>
+              <Input
+                value={restoreFolder}
+                onChange={(e) => {
+                  setRestoreFolder(e.target.value);
+                  setPreviewData(null);
+                  setConfirmRestoreText('');
+                }}
+                placeholder="Ruta de carpeta (contiene .bson y .json)"
+              />
+            </Col>
+            <Col xs={24} md={8}>
+              <Button block onClick={handleSelectFolder}>
+                Seleccionar Carpeta
+              </Button>
+            </Col>
+
+            <Col xs={24} md={12}>
+              <Button
+                type="primary"
+                block
+                loading={previewLoading}
+                onClick={handlePreviewRestore}
+              >
+                Previsualizar Respaldo
+              </Button>
+            </Col>
+            <Col xs={24} md={12}>
+              <Button
+                danger
+                type="primary"
+                block
+                loading={restoreLoading}
+                disabled={!previewData?.ok || confirmRestoreText !== 'RESTAURAR'}
+                onClick={handleRestoreNow}
+              >
+                Restaurar (Borra datos actuales)
+              </Button>
+            </Col>
+
+            <Col xs={24}>
+              <Input
+                value={confirmRestoreText}
+                onChange={(e) => setConfirmRestoreText(e.target.value)}
+                placeholder="Escriba RESTAURAR para confirmar"
+              />
+            </Col>
+          </Row>
+
+          {previewData?.ok && (
+            <div style={{ marginTop: 16 }}>
+              <Divider style={{ margin: '12px 0' }} />
+              <Text strong>Previsualización</Text>
+              <div style={{ marginTop: 8 }}>
+                <Text type="secondary">Base de datos: </Text>
+                <Tag>{previewData.dbName}</Tag>
+              </div>
+
+              <Table
+                style={{ marginTop: 12 }}
+                size="small"
+                rowKey={(r) => `${r.database}-${r.collection}`}
+                pagination={{ pageSize: 10 }}
+                dataSource={previewData.collections || []}
+                columns={[
+                  { title: 'Colección', dataIndex: 'collection' },
+                  { title: 'Registros', dataIndex: 'documents', width: 100 },
+                  {
+                    title: 'Ejemplo',
+                    render: (_, r) => {
+                      const s = r?.samples?.[0] || '';
+                      return (
+                        <pre
+                          style={{
+                            margin: 0,
+                            maxWidth: 520,
+                            maxHeight: 120,
+                            overflow: 'auto',
+                            background: '#0b1220',
+                            color: '#e5e7eb',
+                            padding: 10,
+                            borderRadius: 8,
+                            whiteSpace: 'pre-wrap',
+                          }}
+                        >
+                          {s || '—'}
+                        </pre>
+                      );
+                    },
+                  },
+                ]}
+              />
+            </div>
+          )}
         </Card>
 
         {/* Sección de Impresión */}
