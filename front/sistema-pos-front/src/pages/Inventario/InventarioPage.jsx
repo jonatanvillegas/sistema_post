@@ -79,7 +79,6 @@ export default function InventarioPage() {
   }, [searchParams]);
 
   const round2 = (n) => Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100;
-  const round1 = (n) => Math.round((Number(n || 0) + Number.EPSILON) * 10) / 10;
 
   const getBarcodeFormat = (raw) => {
     const s = String(raw || '').trim();
@@ -102,7 +101,7 @@ export default function InventarioPage() {
       document.body.appendChild(a);
       a.click();
       a.remove();
-    } catch (_e) {
+    } catch {
       toast.error('No se pudo descargar el código de barras');
     }
   };
@@ -141,10 +140,24 @@ export default function InventarioPage() {
         height: 60,
         fontSize: 14,
       });
-    } catch (_e) {
+    } catch {
       setBarcodeError('Código inválido para generar imagen');
     }
   }, [isModalVisible, barcodeAssistEnabled, codigoValue]);
+
+  // Fórmula única (margen como % entero):
+  // precioVenta = precioCompra / (1 - (margenPct/100))
+  const calcPrecioVentaFromCompraMargen = (precioCompra, margenPct) => {
+    const pc = Number(precioCompra);
+    const mPct = Number(margenPct);
+    if (!isFinite(pc) || !isFinite(mPct)) return null;
+    if (pc < 0) return null;
+    if (mPct < 0 || mPct >= 100) return null;
+    const m = mPct / 100;
+    const pv = pc / (1 - m);
+    if (!isFinite(pv) || pv < 0) return null;
+    return round2(pv);
+  };
 
   const calcMargenFromCompraVenta = (precioCompra, precioVenta) => {
     const pc = Number(precioCompra);
@@ -152,32 +165,10 @@ export default function InventarioPage() {
     if (!isFinite(pc) || !isFinite(pv)) return null;
     if (pv <= 0) return null;
     // margen sobre precio de venta (utilidad bruta)
-    const m = ((pv - pc) / pv) * 100;
-    if (!isFinite(m)) return null;
-    return round1(m);
-  };
-
-  const calcPrecioCompraFromVentaMargen = (precioVenta, margenPct) => {
-    const pv = Number(precioVenta);
-    const m = Number(margenPct);
-    if (!isFinite(pv) || !isFinite(m)) return null;
-    if (pv < 0) return null;
-    // compra = venta * (1 - margen%)
-    const pc = pv * (1 - (m / 100));
-    if (!isFinite(pc) || pc < 0) return null;
-    return round2(pc);
-  };
-
-  const calcPrecioVentaFromCompraMargen = (precioCompra, margenPct) => {
-    const pc = Number(precioCompra);
-    const m = Number(margenPct);
-    if (!isFinite(pc) || !isFinite(m)) return null;
-    if (pc < 0) return null;
-    if (m >= 100) return null;
-    // venta = compra / (1 - margen%)
-    const pv = pc / (1 - (m / 100));
-    if (!isFinite(pv) || pv < 0) return null;
-    return round2(pv);
+    const mPct = ((pv - pc) / pv) * 100;
+    if (!isFinite(mPct)) return null;
+    // Margen debe ser entero
+    return Math.round(mPct);
   };
 
   const fetchData = async () => {
@@ -315,31 +306,16 @@ export default function InventarioPage() {
 
     const next = {};
 
-    // Cualquier 2 calculan el 3ro:
-    // - compra + venta -> margen
-    // - venta + margen -> compra
-    // - compra + margen -> venta
-    if (changedKey === 'margenGanancia') {
-      if (isFinite(pv) && pv > 0) {
-        const nextPc = calcPrecioCompraFromVentaMargen(pv, m);
-        if (nextPc !== null && isFinite(nextPc) && nextPc >= 0) next.precioCompra = nextPc;
-      } else if (isFinite(pc) && pc >= 0) {
-        const nextPv = calcPrecioVentaFromCompraMargen(pc, m);
-        if (nextPv !== null && isFinite(nextPv) && nextPv >= 0) next.precioVenta = nextPv;
-      }
-    } else if (changedKey === 'precioVenta') {
-      if (isFinite(pc) && isFinite(pv) && pv > 0) {
+    // Reglas:
+    // - Si cambia compra o margen => recalcular precio de venta
+    // - Si cambia precio de venta => recalcular margen (sin tocar compra)
+    if (changedKey === 'precioVenta') {
+      if (isFinite(pc) && pc >= 0 && isFinite(pv) && pv > 0) {
         const nextM = calcMargenFromCompraVenta(pc, pv);
         if (nextM !== null && isFinite(nextM)) next.margenGanancia = nextM;
-      } else if (isFinite(pv) && isFinite(m) && pv >= 0) {
-        const nextPc = calcPrecioCompraFromVentaMargen(pv, m);
-        if (nextPc !== null && isFinite(nextPc) && nextPc >= 0) next.precioCompra = nextPc;
       }
-    } else if (changedKey === 'precioCompra') {
-      if (isFinite(pc) && isFinite(pv) && pv > 0) {
-        const nextM = calcMargenFromCompraVenta(pc, pv);
-        if (nextM !== null && isFinite(nextM)) next.margenGanancia = nextM;
-      } else if (isFinite(pc) && isFinite(m) && pc >= 0) {
+    } else {
+      if (isFinite(pc) && pc >= 0 && isFinite(m)) {
         const nextPv = calcPrecioVentaFromCompraMargen(pc, m);
         if (nextPv !== null && isFinite(nextPv) && nextPv >= 0) next.precioVenta = nextPv;
       }
@@ -554,9 +530,21 @@ export default function InventarioPage() {
               <Form.Item
                 name="margenGanancia"
                 label="Margen (%)"
-                tooltip="Flexible: con cualquier 2 campos se calcula el 3ro (compra/venta/margen)."
+                tooltip="Ingrese un entero. Precio Venta = Precio Compra / (1 - (Margen/100)). Si ajusta el Precio Venta manualmente (redondeo), se recalcula el Margen."
+                rules={[
+                  { required: true, message: 'Ingrese el margen (%)' },
+                  {
+                    validator: async (_, value) => {
+                      if (value === undefined || value === null || value === '') return;
+                      const m = Number(value);
+                      if (!isFinite(m) || m < 0 || m >= 100) {
+                        throw new Error('El margen debe ser un número entre 0 y 99');
+                      }
+                    },
+                  },
+                ]}
               >
-                <InputNumber style={{ width: '100%' }} min={0} max={99.99} step={0.1} />
+                <InputNumber style={{ width: '100%' }} min={0} max={99} step={1} />
               </Form.Item>
             </Col>
             <Col span={8}>
