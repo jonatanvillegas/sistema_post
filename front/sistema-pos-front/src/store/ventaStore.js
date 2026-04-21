@@ -1,11 +1,48 @@
 import { create } from 'zustand';
 
+const round2 = (n) => Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100;
+
+const calcDiscountMonto = ({ baseAmount, tipo, valor }) => {
+  const base = Number(baseAmount);
+  const v = Number(valor);
+  if (!isFinite(base) || base <= 0) return 0;
+  if (!isFinite(v) || v <= 0) return 0;
+
+  if (tipo === 'porcentaje') {
+    const pct = Math.min(Math.max(0, v), 100);
+    return round2(base * (pct / 100));
+  }
+  if (tipo === 'monto') {
+    return round2(Math.min(Math.max(0, v), base));
+  }
+  return 0;
+};
+
+const recalcItem = (item) => {
+  const qty = Number(item?.cantidad || 0);
+  const unit = Number(item?.precioUnitario || 0);
+  const subtotalBruto = round2(qty * unit);
+  const descuentoTipo = item?.descuentoTipo || 'ninguno';
+  const descuentoValor = Number(item?.descuentoValor || 0);
+  const descuentoMonto = calcDiscountMonto({ baseAmount: subtotalBruto, tipo: descuentoTipo, valor: descuentoValor });
+  const subtotal = round2(subtotalBruto - descuentoMonto);
+  return {
+    ...item,
+    subtotalBruto,
+    descuentoTipo,
+    descuentoValor,
+    descuentoMonto,
+    subtotal,
+  };
+};
+
 const crearPestana = (id) => ({
   id,
   nombre: `Venta ${id}`,
   cliente: { nombre: 'Consumidor Final', nit: 'CF' },
   productos: [],
-  descuento: 0,
+  descuentoGeneralTipo: 'ninguno',
+  descuentoGeneralValor: 0,
 });
 
 export const useVentaStore = create((set, get) => ({
@@ -40,7 +77,7 @@ export const useVentaStore = create((set, get) => ({
           ...p,
           productos: p.productos.map((x) =>
             x.productoId === producto._id
-              ? { ...x, cantidad: x.cantidad + 1, subtotal: (x.cantidad + 1) * x.precioUnitario }
+              ? recalcItem({ ...x, cantidad: x.cantidad + 1 })
               : x
           ),
         };
@@ -49,16 +86,17 @@ export const useVentaStore = create((set, get) => ({
         ...p,
         productos: [
           ...p.productos,
-          {
+          recalcItem({
             productoId: producto._id,
             nombre: producto.nombre,
             codigo: producto.codigo || '',
             cantidad: 1,
             precioUnitario: producto.precioVenta,
-            subtotal: producto.precioVenta,
+            descuentoTipo: 'ninguno',
+            descuentoValor: 0,
             stockDisponible: producto.controlaStock !== false ? producto.stock : null,
             controlaStock: producto.controlaStock !== false,
-          },
+          }),
         ],
       };
     });
@@ -73,7 +111,27 @@ export const useVentaStore = create((set, get) => ({
         ...p,
         productos: p.productos.map((x) =>
           x.productoId === productoId
-            ? { ...x, cantidad, subtotal: cantidad * x.precioUnitario }
+            ? recalcItem({ ...x, cantidad })
+            : x
+        ),
+      };
+    });
+    set({ pestanas: nuevas });
+  },
+
+  cambiarDescuentoProducto: (productoId, descuentoTipo, descuentoValor) => {
+    const { pestanas, pestanaActiva } = get();
+    const nuevas = pestanas.map((p) => {
+      if (p.id !== pestanaActiva) return p;
+      return {
+        ...p,
+        productos: p.productos.map((x) =>
+          x.productoId === productoId
+            ? recalcItem({
+                ...x,
+                descuentoTipo: descuentoTipo || 'ninguno',
+                descuentoValor: Number(descuentoValor || 0),
+              })
             : x
         ),
       };
@@ -90,10 +148,16 @@ export const useVentaStore = create((set, get) => ({
     set({ pestanas: nuevas });
   },
 
-  setDescuento: (descuento) => {
+  setDescuentoGeneral: (descuentoGeneralTipo, descuentoGeneralValor) => {
     const { pestanas, pestanaActiva } = get();
     const nuevas = pestanas.map((p) =>
-      p.id === pestanaActiva ? { ...p, descuento: Number(descuento) } : p
+      p.id === pestanaActiva
+        ? {
+            ...p,
+            descuentoGeneralTipo: descuentoGeneralTipo || 'ninguno',
+            descuentoGeneralValor: Number(descuentoGeneralValor || 0),
+          }
+        : p
     );
     set({ pestanas: nuevas });
   },
@@ -117,7 +181,13 @@ export const useVentaStore = create((set, get) => ({
     const { pestanas, pestanaActiva } = get();
     const nuevas = pestanas.map((p) =>
       p.id === pestanaActiva
-        ? { ...p, productos: [], descuento: 0, cliente: { nombre: 'Consumidor Final', nit: 'CF', _id: null } }
+        ? {
+            ...p,
+            productos: [],
+            descuentoGeneralTipo: 'ninguno',
+            descuentoGeneralValor: 0,
+            cliente: { nombre: 'Consumidor Final', nit: 'CF', _id: null },
+          }
         : p
     );
     set({ pestanas: nuevas });
@@ -130,12 +200,27 @@ export const useVentaStore = create((set, get) => ({
 
   getSubtotal: () => {
     const pestana = get().getPestanaActiva();
-    return pestana?.productos.reduce((s, p) => s + p.subtotal, 0) || 0;
+    return pestana?.productos.reduce((s, p) => s + (Number(p.subtotalBruto) || 0), 0) || 0;
+  },
+
+  getDescuentoTotal: () => {
+    const pestana = get().getPestanaActiva();
+    const productos = pestana?.productos || [];
+    const subtotalBruto = productos.reduce((s, p) => s + (Number(p.subtotalBruto) || 0), 0);
+    const descuentoLineas = productos.reduce((s, p) => s + (Number(p.descuentoMonto) || 0), 0);
+    const baseGeneral = Math.max(0, subtotalBruto - descuentoLineas);
+    const descGeneralMonto = calcDiscountMonto({
+      baseAmount: baseGeneral,
+      tipo: pestana?.descuentoGeneralTipo,
+      valor: pestana?.descuentoGeneralValor,
+    });
+    return round2(descuentoLineas + descGeneralMonto);
   },
 
   getTotal: () => {
     const pestana = get().getPestanaActiva();
-    const sub = pestana?.productos.reduce((s, p) => s + p.subtotal, 0) || 0;
-    return sub - (pestana?.descuento || 0);
+    const sub = get().getSubtotal();
+    const desc = get().getDescuentoTotal();
+    return round2(sub - desc);
   },
 }));

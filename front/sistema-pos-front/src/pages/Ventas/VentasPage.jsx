@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Row, Col, Card, Input, Button, Tabs, Table, Typography, 
   Space, Badge, Modal, InputNumber, Radio, Divider, Empty, Tag,
-  Alert, Tooltip, Select, DatePicker
+  Alert, Tooltip, Select, DatePicker, List
 } from 'antd';
 import { 
   SearchOutlined, PlusOutlined, CloseOutlined, 
@@ -49,7 +49,8 @@ export default function VentasPage() {
   const { 
     pestanas, pestanaActiva, agregarPestana, cerrarPestana, setPestanaActiva,
     agregarProducto, quitarProducto, cambiarCantidad, getPestanaActiva, 
-    getTotal, getSubtotal, limpiarPestana, setCliente
+    cambiarDescuentoProducto, setDescuentoGeneral,
+    getTotal, getSubtotal, getDescuentoTotal, limpiarPestana, setCliente
   } = useVentaStore();
   
   const { cajaActual } = useCajaStore();
@@ -132,6 +133,7 @@ export default function VentasPage() {
   const currentTab = useMemo(() => getPestanaActiva(), [pestanas, pestanaActiva]);
   const totalActivo = useMemo(() => getTotal(), [pestanas, pestanaActiva]);
   const subtotalActivo = useMemo(() => getSubtotal(), [pestanas, pestanaActiva]);
+  const descuentoActivo = useMemo(() => getDescuentoTotal(), [pestanas, pestanaActiva]);
 
   // Vuelto calculado
   const vuelto = useMemo(() => {
@@ -289,9 +291,12 @@ export default function VentasPage() {
         clienteId: currentTab.cliente?._id || null,
         productos: currentTab.productos.map(p => ({
           productoId: p.productoId,
-          cantidad: p.cantidad
+          cantidad: p.cantidad,
+          descuentoTipo: p.descuentoTipo,
+          descuentoValor: p.descuentoValor,
         })),
-        descuento: currentTab.descuento,
+        descuentoGeneralTipo: currentTab.descuentoGeneralTipo,
+        descuentoGeneralValor: currentTab.descuentoGeneralValor,
         metodoPago,
         montoRecibido: metodoPago === 'efectivo' ? montoRecibido : (metodoPago === 'credito' ? 0 : totalActivo)
       };
@@ -358,51 +363,88 @@ export default function VentasPage() {
     }
   };
 
-  const columns = [
-    {
-      title: 'Producto',
-      dataIndex: 'nombre',
-      key: 'nombre',
-      render: (text) => <Text ellipsis={{ tooltip: text }} style={{ fontSize: 13, width: 140 }}>{text}</Text>
-    },
-    {
-      title: 'Cant.',
-      dataIndex: 'cantidad',
-      key: 'cantidad',
-      width: 70,
-      render: (val, record) => (
-        <InputNumber 
-          min={1} 
-          max={record.controlaStock === false ? undefined : record.stockDisponible}
-          size="small" 
-          value={val} 
-          onChange={(v) => cambiarCantidad(record.productoId, v)} 
-          style={{ width: 55 }}
-        />
-      )
-    },
-    {
-      title: 'Sub.',
-      dataIndex: 'subtotal',
-      key: 'subtotal',
-      align: 'right',
-      render: (val) => <Text style={{ fontSize: 13 }}>{formatCurrency(val)}</Text>
-    },
-    {
-      title: '',
-      key: 'delete',
-      width: 30,
-      render: (_, record) => (
-        <Button 
-          type="text" 
-          danger 
-          size="small" 
-          icon={<CloseOutlined style={{ fontSize: 11 }} />} 
-          onClick={() => quitarProducto(record.productoId)} 
-        />
-      )
-    }
-  ];
+  const renderCarritoItem = (item) => {
+    const tipo = item?.descuentoTipo || 'ninguno';
+    const isPct = tipo === 'porcentaje';
+
+    return (
+      <div className="carrito-item-col">
+        <div className="carrito-item-top">
+          <Text
+            strong
+            ellipsis={{ tooltip: item?.nombre }}
+            style={{ fontSize: 13, maxWidth: 260 }}
+          >
+            {item?.nombre}
+          </Text>
+          <Button
+            type="text"
+            danger
+            size="small"
+            icon={<CloseOutlined style={{ fontSize: 11 }} />}
+            onClick={() => quitarProducto(item.productoId)}
+          />
+        </div>
+
+        <div className="carrito-item-meta">
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            {formatCurrency(Number(item?.precioUnitario) || 0)} c/u
+          </Text>
+          <Text style={{ fontSize: 12 }}>
+            Sub: <Text strong>{formatCurrency(Number(item?.subtotal) || 0)}</Text>
+          </Text>
+        </div>
+
+        <div className="carrito-item-row">
+          <Text type="secondary" style={{ fontSize: 11, width: 50 }}>
+            Cant.
+          </Text>
+          <InputNumber
+            min={1}
+            max={item?.controlaStock === false ? undefined : item?.stockDisponible}
+            size="small"
+            value={item?.cantidad}
+            onChange={(v) => cambiarCantidad(item.productoId, v)}
+            style={{ width: 90 }}
+          />
+        </div>
+
+        <div className="carrito-item-row">
+          <Text type="secondary" style={{ fontSize: 11, width: 50 }}>
+            Desc.
+          </Text>
+          <Space.Compact size="small" style={{ width: '100%' }}>
+            <Select
+              size="small"
+              value={tipo}
+              style={{ width: 90 }}
+              dropdownMatchSelectWidth={false}
+              options={[
+                { value: 'ninguno', label: 'Ninguno' },
+                { value: 'monto', label: 'Monto (C$)' },
+                { value: 'porcentaje', label: 'Porcentaje (%)' },
+              ]}
+              onChange={(nextTipo) => {
+                const nextVal = nextTipo === 'ninguno' ? 0 : (item?.descuentoValor || 0);
+                cambiarDescuentoProducto(item.productoId, nextTipo, nextVal);
+              }}
+            />
+            <InputNumber
+              size="small"
+              disabled={tipo === 'ninguno'}
+              min={0}
+              max={isPct ? 100 : undefined}
+              step={isPct ? 1 : 0.01}
+              value={item?.descuentoValor || 0}
+              onChange={(v) => cambiarDescuentoProducto(item.productoId, tipo, v)}
+              style={{ width: '100%' }}
+              controls={false}
+            />
+          </Space.Compact>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div style={{ margin: -24 }}>
@@ -523,20 +565,54 @@ export default function VentasPage() {
                 <p>Carrito vacío</p>
               </div>
             ) : (
-              <Table 
-                columns={columns} 
-                dataSource={currentTab?.productos} 
-                rowKey="productoId"
-                pagination={false}
-                size="small"
-                showHeader={false}
+              <List
+                dataSource={currentTab?.productos}
+                renderItem={(item) => (
+                  <List.Item key={item?.productoId} style={{ padding: 0, borderBottom: 'none' }}>
+                    {renderCarritoItem(item)}
+                  </List.Item>
+                )}
               />
             )}
           </div>
 
           <div className="carrito-total-section">
             <div className="total-row"><Text>Subtotal:</Text><Text strong>{formatCurrency(subtotalActivo)}</Text></div>
-            <div className="total-row"><Text>Descuento:</Text><Text style={{ color: '#f5222d' }}>- {formatCurrency(currentTab?.descuento || 0)}</Text></div>
+            <div className="total-row" style={{ alignItems: 'center' }}>
+              <Text>Descuento:</Text>
+              <Text style={{ color: '#f5222d' }}>- {formatCurrency(descuentoActivo)}</Text>
+            </div>
+
+            <div className="total-row" style={{ alignItems: 'center' }}>
+              <Text type="secondary">Desc. general:</Text>
+              <Space.Compact size="small">
+                <Select
+                  size="small"
+                  value={currentTab?.descuentoGeneralTipo || 'ninguno'}
+                  style={{ width: 110 }}
+                  options={[
+                    { value: 'ninguno', label: 'Ninguno' },
+                    { value: 'monto', label: 'Monto (C$)' },
+                    { value: 'porcentaje', label: 'Porcentaje (%)' },
+                  ]}
+                  onChange={(tipo) => {
+                    const nextVal = tipo === 'ninguno' ? 0 : (currentTab?.descuentoGeneralValor || 0);
+                    setDescuentoGeneral(tipo, nextVal);
+                  }}
+                />
+                <InputNumber
+                  size="small"
+                  disabled={(currentTab?.descuentoGeneralTipo || 'ninguno') === 'ninguno'}
+                  min={0}
+                  max={(currentTab?.descuentoGeneralTipo || 'ninguno') === 'porcentaje' ? 100 : undefined}
+                  step={(currentTab?.descuentoGeneralTipo || 'ninguno') === 'porcentaje' ? 1 : 0.01}
+                  value={currentTab?.descuentoGeneralValor || 0}
+                  onChange={(v) => setDescuentoGeneral(currentTab?.descuentoGeneralTipo || 'ninguno', v)}
+                  style={{ width: 110 }}
+                  controls={false}
+                />
+              </Space.Compact>
+            </div>
             <div className="total-row main"><Text strong>TOTAL:</Text><Title level={3} style={{ margin: 0, color: '#1677ff' }}>{formatCurrency(totalActivo)}</Title></div>
           </div>
 

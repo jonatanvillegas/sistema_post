@@ -12,6 +12,7 @@ import ArqueoPage from '../pages/Caja/ArqueoPage';
 import ClientesPage from '../pages/Clientes/ClientesPage';
 import AjustesPage from '../pages/Usuarios/AjustesPage';
 import CategoriasPage from '../pages/Categorias/CategoriasPage';
+import VentasReportePage from '../pages/Admin/VentasReportePage';
 import { useAuthStore } from '../store/authStore';
 
 const HomeRedirect = () => {
@@ -51,6 +52,7 @@ export default function AppRouter() {
               <Route path="/usuarios" element={<UsuariosPage />} />
               <Route path="/ajustes" element={<AjustesPage />} />
               <Route path="/categorias" element={<CategoriasPage />} />
+              <Route path="/ventas-reporte" element={<VentasReportePage />} />
             </Route>
 
             <Route path="/" element={<HomeRedirect />} />

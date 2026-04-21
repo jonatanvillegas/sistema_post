@@ -7,6 +7,33 @@ const mongoose = require('mongoose');
 
 const isControlaStock = (producto) => producto?.controlaStock !== false;
 
+const round2 = (n) => Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100;
+
+const safeDiscount = ({ baseAmount, tipo, valor }) => {
+  const base = Number(baseAmount);
+  if (!isFinite(base) || base <= 0) return { tipo: 'ninguno', valor: 0, monto: 0 };
+
+  const t = String(tipo || 'ninguno');
+  const v = Number(valor);
+  if (!isFinite(v) || v <= 0) return { tipo: 'ninguno', valor: 0, monto: 0 };
+
+  let monto = 0;
+  if (t === 'porcentaje') {
+    if (v >= 100) {
+      monto = base;
+    } else {
+      monto = base * (v / 100);
+    }
+  } else if (t === 'monto') {
+    monto = v;
+  } else {
+    return { tipo: 'ninguno', valor: 0, monto: 0 };
+  }
+
+  monto = Math.min(Math.max(0, monto), base);
+  return { tipo: t, valor: v, monto: round2(monto) };
+};
+
 // @GET /api/ventas
 const getVentas = async (req, res) => {
   try {
@@ -43,6 +70,72 @@ const getVentas = async (req, res) => {
   }
 };
 
+// @GET /api/ventas/reporte/admin  (solo Admin)
+const getVentasReporteAdmin = async (req, res) => {
+  try {
+    const { desde, hasta } = req.query;
+    if (!desde || !hasta) {
+      return res.status(400).json({ mensaje: 'Debe enviar desde y hasta (YYYY-MM-DD)' });
+    }
+
+    const d0 = new Date(String(desde));
+    const d1 = new Date(String(hasta));
+    if (Number.isNaN(d0.getTime()) || Number.isNaN(d1.getTime())) {
+      return res.status(400).json({ mensaje: 'Rango de fecha inválido' });
+    }
+    d0.setHours(0, 0, 0, 0);
+    d1.setHours(23, 59, 59, 999);
+
+    const match = {
+      estado: 'completada',
+      fecha: { $gte: d0, $lte: d1 },
+    };
+
+    const [agg] = await Venta.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: null,
+          cantidadVentas: { $sum: 1 },
+          subtotalBruto: { $sum: '$subtotal' },
+          totalDescuentos: { $sum: '$descuento' },
+          totalVendido: { $sum: '$total' },
+
+          conDescuentoCount: { $sum: { $cond: [{ $gt: ['$descuento', 0] }, 1, 0] } },
+          conDescuentoTotal: { $sum: { $cond: [{ $gt: ['$descuento', 0] }, '$total', 0] } },
+
+          sinDescuentoCount: { $sum: { $cond: [{ $eq: ['$descuento', 0] }, 1, 0] } },
+          sinDescuentoTotal: { $sum: { $cond: [{ $eq: ['$descuento', 0] }, '$total', 0] } },
+        },
+      },
+    ]);
+
+    const totales = {
+      cantidadVentas: Number(agg?.cantidadVentas) || 0,
+      subtotalBruto: round2(agg?.subtotalBruto || 0),
+      totalDescuentos: round2(agg?.totalDescuentos || 0),
+      totalVendido: round2(agg?.totalVendido || 0),
+      conDescuento: {
+        count: Number(agg?.conDescuentoCount) || 0,
+        total: round2(agg?.conDescuentoTotal || 0),
+      },
+      sinDescuento: {
+        count: Number(agg?.sinDescuentoCount) || 0,
+        total: round2(agg?.sinDescuentoTotal || 0),
+      },
+    };
+
+    const ventas = await Venta.find(match)
+      .populate('usuarioId', 'nombre')
+      .sort({ fecha: -1 })
+      .limit(1000);
+
+    res.json({ desde, hasta, totales, ventas });
+  } catch (error) {
+    res.status(500).json({ mensaje: 'Error al generar reporte', error: error.message });
+  }
+};
+
 // @GET /api/ventas/:id
 const getVentaById = async (req, res) => {
   try {
@@ -57,7 +150,17 @@ const getVentaById = async (req, res) => {
 // @POST /api/ventas
 const createVenta = async (req, res) => {
   try {
-    const { cliente, productos, descuento = 0, metodoPago, montoRecibido, clienteId } = req.body;
+    const {
+      cliente,
+      productos,
+      // Backward compatible: descuento numérico como descuento general en monto
+      descuento = 0,
+      descuentoGeneralTipo,
+      descuentoGeneralValor,
+      metodoPago,
+      montoRecibido,
+      clienteId,
+    } = req.body;
 
     if (!productos || productos.length === 0) {
       return res.status(400).json({ mensaje: 'La venta debe tener al menos un producto' });
@@ -81,8 +184,9 @@ const createVenta = async (req, res) => {
       infoCliente = { nombre: clienteDoc.nombre, nit: clienteDoc.nit };
     }
 
-    // 2. Verificar stock y calcular subtotales
-    let subtotal = 0;
+    // 2. Verificar stock y calcular subtotales/desc.
+    let subtotalBruto = 0;
+    let descuentoLineas = 0;
     const productosVenta = [];
 
     for (const item of productos) {
@@ -95,8 +199,22 @@ const createVenta = async (req, res) => {
         throw new Error(`Stock insuficiente para "${producto.nombre}". Disponible: ${producto.stock}`);
       }
 
-      const itemSubtotal = producto.precioVenta * item.cantidad;
-      subtotal += itemSubtotal;
+      const qty = Number(item.cantidad);
+      if (!isFinite(qty) || qty < 1) {
+        throw new Error(`Cantidad inválida para "${producto.nombre}"`);
+      }
+      const unit = Number(producto.precioVenta);
+
+      const itemSubtotalBruto = unit * qty;
+      subtotalBruto += itemSubtotalBruto;
+
+      const descLinea = safeDiscount({
+        baseAmount: itemSubtotalBruto,
+        tipo: item?.descuentoTipo,
+        valor: item?.descuentoValor,
+      });
+      descuentoLineas += descLinea.monto;
+      const itemSubtotal = round2(itemSubtotalBruto - descLinea.monto);
 
       productosVenta.push({
         productoId: producto._id,
@@ -104,6 +222,10 @@ const createVenta = async (req, res) => {
         codigo: producto.codigo || '',
         cantidad: item.cantidad,
         precioUnitario: producto.precioVenta,
+        subtotalBruto: round2(itemSubtotalBruto),
+        descuentoTipo: descLinea.tipo,
+        descuentoValor: descLinea.valor,
+        descuentoMonto: descLinea.monto,
         subtotal: itemSubtotal,
       });
 
@@ -125,7 +247,17 @@ const createVenta = async (req, res) => {
       }
     }
 
-    const total = subtotal - descuento;
+    subtotalBruto = round2(subtotalBruto);
+    descuentoLineas = round2(descuentoLineas);
+    const baseGeneral = Math.max(0, subtotalBruto - descuentoLineas);
+
+    // Descuento general: preferir {descuentoGeneralTipo/Valor}. Si no viene, usar "descuento" como monto.
+    const generalTipo = descuentoGeneralTipo ? String(descuentoGeneralTipo) : (Number(descuento) > 0 ? 'monto' : 'ninguno');
+    const generalValor = descuentoGeneralTipo ? descuentoGeneralValor : descuento;
+    const descGeneral = safeDiscount({ baseAmount: baseGeneral, tipo: generalTipo, valor: generalValor });
+
+    const descuentoTotal = round2(descuentoLineas + descGeneral.monto);
+    const total = round2(subtotalBruto - descuentoTotal);
     
     // 4. Validar límite de crédito if applica
     if (metodoPago === 'credito') {
@@ -157,8 +289,12 @@ const createVenta = async (req, res) => {
       cliente: infoCliente,
       clienteId: clienteId || null,
       productos: productosVenta,
-      subtotal,
-      descuento,
+      subtotal: subtotalBruto,
+      descuento: descuentoTotal,
+      descuentoLineas,
+      descuentoGeneralTipo: descGeneral.tipo,
+      descuentoGeneralValor: descGeneral.valor,
+      descuentoGeneralMonto: descGeneral.monto,
       total,
       metodoPago: metodoPago || 'efectivo',
       montoRecibido: metodoPago === 'credito' ? 0 : (montoRecibido || total),
@@ -314,4 +450,4 @@ const anularVenta = async (req, res) => {
   }
 };
 
-module.exports = { getVentas, getVentaById, createVenta, anularVenta };
+module.exports = { getVentas, getVentaById, getVentasReporteAdmin, createVenta, anularVenta };

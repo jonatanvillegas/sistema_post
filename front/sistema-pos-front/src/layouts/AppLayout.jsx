@@ -8,6 +8,7 @@ import {
   DollarOutlined, TruckOutlined, UserOutlined, LogoutOutlined,
   SettingOutlined, BellOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
   AppstoreOutlined, ExclamationCircleOutlined,
+  BarChartOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '../store/authStore';
 import { useCajaStore } from '../store/cajaStore';
@@ -35,6 +36,7 @@ const inventarioMenuItems = [
 ];
 
 const adminItems = [
+  { key: '/ventas-reporte', icon: <BarChartOutlined />, label: 'Reporte de Ventas' },
   { key: '/usuarios', icon: <UserOutlined />, label: 'Usuarios' },
   { key: '/categorias', icon: <InboxOutlined />, label: 'Categorías' },
   { key: '/ajustes', icon: <SettingOutlined />, label: 'Ajustes' },

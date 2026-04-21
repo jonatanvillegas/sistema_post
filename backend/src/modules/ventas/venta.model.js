@@ -11,6 +11,14 @@ const itemVentaSchema = new mongoose.Schema(
     codigo: { type: String, default: '' },
     cantidad: { type: Number, required: true, min: 1 },
     precioUnitario: { type: Number, required: true },
+    subtotalBruto: { type: Number, default: 0 },
+    descuentoTipo: {
+      type: String,
+      enum: ['ninguno', 'monto', 'porcentaje'],
+      default: 'ninguno',
+    },
+    descuentoValor: { type: Number, default: 0 },
+    descuentoMonto: { type: Number, default: 0 },
     subtotal: { type: Number, required: true },
   },
   { _id: false }
@@ -32,9 +40,21 @@ const ventaSchema = new mongoose.Schema(
       default: null,
     },
     productos: [itemVentaSchema],
+    // subtotal = subtotal bruto (antes de cualquier descuento)
     subtotal: { type: Number, required: true },
+    // descuento = descuento total (líneas + descuento general)
     descuento: { type: Number, default: 0 },
     total: { type: Number, required: true },
+
+    // Desglose opcional (para reportes/auditoría)
+    descuentoLineas: { type: Number, default: 0 },
+    descuentoGeneralTipo: {
+      type: String,
+      enum: ['ninguno', 'monto', 'porcentaje'],
+      default: 'ninguno',
+    },
+    descuentoGeneralValor: { type: Number, default: 0 },
+    descuentoGeneralMonto: { type: Number, default: 0 },
     metodoPago: {
       type: String,
       enum: ['efectivo', 'tarjeta', 'transferencia', 'mixto', 'credito'],
