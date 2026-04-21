@@ -218,7 +218,6 @@ export const useVentaStore = create((set, get) => ({
   },
 
   getTotal: () => {
-    const pestana = get().getPestanaActiva();
     const sub = get().getSubtotal();
     const desc = get().getDescuentoTotal();
     return round2(sub - desc);

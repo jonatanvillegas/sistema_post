@@ -36,7 +36,7 @@ export default function UsuariosPage() {
     try {
       const res = await getUsuarios();
       setData(res.data);
-    } catch (err) {
+    } catch {
       toast.error('Error al cargar usuarios');
     } finally {
       setLoading(false);
@@ -83,7 +83,7 @@ export default function UsuariosPage() {
       await deleteUsuario(id);
       toast.success('Usuario eliminado');
       fetchData();
-    } catch (err) {
+    } catch {
       toast.error('Error al eliminar usuario');
     }
   };

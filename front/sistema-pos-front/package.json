@@ -21,6 +21,7 @@
     "react-router-dom": "^7.14.0",
     "react-to-print": "^3.3.0",
     "recharts": "^3.8.1",
+    "sistema-pos-escritorio": "file:../..",
     "zustand": "^5.0.12"
   },
   "devDependencies": {

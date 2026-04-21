@@ -76,7 +76,7 @@ export default function ClientesPage() {
     try {
       const res = await getClientes(buscar);
       setClientes(res.data);
-    } catch (err) {
+    } catch {
       message.error('Error al cargar clientes');
     } finally {
       setLoading(false);
@@ -114,7 +114,7 @@ export default function ClientesPage() {
       setSelectedCliente(clienteRes.data);
       const res = creditosRes;
       setCreditos(res.data);
-    } catch (err) {
+    } catch {
       message.error('Error al cargar créditos');
     } finally {
       setLoadingCreditos(false);

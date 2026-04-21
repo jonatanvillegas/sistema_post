@@ -118,7 +118,7 @@ export default function ArqueoPage() {
     return round2(totalConsolidado - saldoSistemaAjustado);
   }, [totalConsolidado, saldoSistemaAjustado]);
 
-  const montoAEntregar = useMemo(
+  const _montoAEntregar = useMemo(
     () => round2(Number(totalConsolidado) - Number(depositoTransferencia || 0)),
     [totalConsolidado, depositoTransferencia]
   );

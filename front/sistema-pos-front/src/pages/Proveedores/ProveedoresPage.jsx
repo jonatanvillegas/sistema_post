@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Table, Card, Button, Input, Space, Typography, Tag, 
   Modal, Form, InputNumber, Select, Row, Col, Divider, 
-  List, message, Alert, Popconfirm
+  List, Alert, Popconfirm
 } from 'antd';
 import { 
   PlusOutlined, SearchOutlined, EditOutlined, 
@@ -65,7 +65,7 @@ export default function ProveedoresPage() {
     try {
       const res = await getCajaActual();
       if (res?.data?.caja) setCajaActual(res.data.caja);
-    } catch (err) {
+    } catch {
       // Si no hay caja abierta o falla, limpiamos el estado para que la UI sea consistente
       limpiarCaja();
     }
@@ -76,7 +76,7 @@ export default function ProveedoresPage() {
     try {
       const res = await getProveedores();
       setProveedores(res.data);
-    } catch (err) {
+    } catch {
       toast.error('Error al cargar proveedores');
     } finally {
       setLoading(false);
@@ -106,7 +106,7 @@ export default function ProveedoresPage() {
       }
       setIsModalVisible(false);
       fetchData();
-    } catch (err) {
+    } catch {
       toast.error('Error al guardar proveedor');
     }
   };
@@ -116,7 +116,7 @@ export default function ProveedoresPage() {
       await deleteProveedor(id);
       toast.success('Proveedor desactivado');
       fetchData();
-    } catch (err) {
+    } catch {
       toast.error('Error al eliminar');
     }
   };
@@ -158,7 +158,7 @@ export default function ProveedoresPage() {
     try {
       const res = await getComprasProveedor(proveedorId);
       setComprasProveedor(res.data);
-    } catch (err) {
+    } catch {
       toast.error('Error al cargar compras del proveedor');
     } finally {
       setLoadingCompras(false);

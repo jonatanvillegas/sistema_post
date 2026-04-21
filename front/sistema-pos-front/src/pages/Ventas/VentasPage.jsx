@@ -144,7 +144,6 @@ export default function VentasPage() {
 
   // Estado para el scanner global
   const [isScanning, setIsScanning] = useState(false);
-  const scanBuffer = useRef('');
   const lastKeyTime = useRef(Date.now());
   const lastProcessedCode = useRef('');
   const lastProcessedTime = useRef(0);
@@ -253,7 +252,7 @@ export default function VentasPage() {
         return;
       }
       setProductos(results);
-    } catch (err) {
+    } catch {
       toast.error('Error al buscar productos');
     } finally {
       setLoading(false);
@@ -386,61 +385,86 @@ export default function VentasPage() {
           />
         </div>
 
+        {/* Cantidad + Precio unitario */}
         <div className="carrito-item-meta">
-          <Text type="secondary" style={{ fontSize: 11 }}>
-            {formatCurrency(Number(item?.precioUnitario) || 0)} c/u
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Text type="secondary" style={{ fontSize: 11, width: 62 }}>
+              Cantidad
+            </Text>
+            <InputNumber
+              min={1}
+              max={item?.controlaStock === false ? undefined : item?.stockDisponible}
+              size="small"
+              value={item?.cantidad}
+              onChange={(v) => cambiarCantidad(item.productoId, v)}
+              style={{ width: 90 }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              Precio unit.
+            </Text>
+            <Text style={{ fontSize: 12 }}>
+              <Text strong>{formatCurrency(Number(item?.precioUnitario) || 0)}</Text>
+            </Text>
+          </div>
+        </div>
+
+        {/* Fila de descuento */}
+        <div className="carrito-item-meta">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+            <Text type="secondary" style={{ fontSize: 11, width: 62 }}>
+              Desc
+            </Text>
+            <Space.Compact size="small" style={{ width: '100%' }}>
+              <Select
+                size="small"
+                value={tipo}
+                style={{ width: 90 }}
+                dropdownMatchSelectWidth={false}
+                options={[
+                  { value: 'ninguno', label: 'Ninguno' },
+                  { value: 'monto', label: 'Monto (C$)' },
+                  { value: 'porcentaje', label: 'Porcentaje (%)' },
+                ]}
+                onChange={(nextTipo) => {
+                  const nextVal = nextTipo === 'ninguno' ? 0 : (item?.descuentoValor || 0);
+                  cambiarDescuentoProducto(item.productoId, nextTipo, nextVal);
+                }}
+              />
+              <InputNumber
+                size="small"
+                disabled={tipo === 'ninguno'}
+                min={0}
+                max={isPct ? 100 : undefined}
+                step={isPct ? 1 : 0.01}
+                value={item?.descuentoValor || 0}
+                onChange={(v) => cambiarDescuentoProducto(item.productoId, tipo, v)}
+                style={{ width: '100%' }}
+                controls={false}
+              />
+            </Space.Compact>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              -
+            </Text>
+            <Text style={{ fontSize: 12, color: '#f5222d' }}>
+              {formatCurrency(Number(item?.descuentoMonto) || 0)}
+            </Text>
+          </div>
+        </div>
+
+        {/* Subtotal (bruto) y Total (neto) en la misma fila */}
+        <div className="carrito-item-meta">
+          <Text style={{ fontSize: 12 }}>
+            Subtotal: <Text strong>{formatCurrency(Number(item?.subtotalBruto) || 0)}</Text>
           </Text>
           <Text style={{ fontSize: 12 }}>
-            Sub: <Text strong>{formatCurrency(Number(item?.subtotal) || 0)}</Text>
+            Total: <Text strong>{formatCurrency(Number(item?.subtotal) || 0)}</Text>
           </Text>
-        </div>
-
-        <div className="carrito-item-row">
-          <Text type="secondary" style={{ fontSize: 11, width: 50 }}>
-            Cant.
-          </Text>
-          <InputNumber
-            min={1}
-            max={item?.controlaStock === false ? undefined : item?.stockDisponible}
-            size="small"
-            value={item?.cantidad}
-            onChange={(v) => cambiarCantidad(item.productoId, v)}
-            style={{ width: 90 }}
-          />
-        </div>
-
-        <div className="carrito-item-row">
-          <Text type="secondary" style={{ fontSize: 11, width: 50 }}>
-            Desc.
-          </Text>
-          <Space.Compact size="small" style={{ width: '100%' }}>
-            <Select
-              size="small"
-              value={tipo}
-              style={{ width: 90 }}
-              dropdownMatchSelectWidth={false}
-              options={[
-                { value: 'ninguno', label: 'Ninguno' },
-                { value: 'monto', label: 'Monto (C$)' },
-                { value: 'porcentaje', label: 'Porcentaje (%)' },
-              ]}
-              onChange={(nextTipo) => {
-                const nextVal = nextTipo === 'ninguno' ? 0 : (item?.descuentoValor || 0);
-                cambiarDescuentoProducto(item.productoId, nextTipo, nextVal);
-              }}
-            />
-            <InputNumber
-              size="small"
-              disabled={tipo === 'ninguno'}
-              min={0}
-              max={isPct ? 100 : undefined}
-              step={isPct ? 1 : 0.01}
-              value={item?.descuentoValor || 0}
-              onChange={(v) => cambiarDescuentoProducto(item.productoId, tipo, v)}
-              style={{ width: '100%' }}
-              controls={false}
-            />
-          </Space.Compact>
         </div>
       </div>
     );
