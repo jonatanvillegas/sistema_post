@@ -5,7 +5,7 @@ WORKDIR /app
 # Frontend
 COPY front/sistema-pos-front/package.json front/sistema-pos-front/package.json
 COPY front/sistema-pos-front/package-lock.json front/sistema-pos-front/package-lock.json
-RUN npm --prefix front/sistema-pos-front ci
+RUN npm --prefix front/sistema-pos-front install --legacy-peer-deps
 COPY front/sistema-pos-front front/sistema-pos-front
 RUN npm --prefix front/sistema-pos-front run build
 
