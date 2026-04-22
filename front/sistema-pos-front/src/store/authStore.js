@@ -15,6 +15,14 @@ export const useAuthStore = create(
       isCajero: () => get().usuario?.rol === 'cajero',
       isInventario: () => get().usuario?.rol === 'inventario',
 
+      canApplyDiscount: () => {
+        const u = get().usuario;
+        if (!u) return false;
+        if (u.rol === 'admin') return true;
+        if (u.rol === 'cajero') return Boolean(u.puedeAplicarDescuento);
+        return false;
+      },
+
       hasAnyRole: (roles = []) => {
         const rol = get().usuario?.rol;
         if (!rol) return false;

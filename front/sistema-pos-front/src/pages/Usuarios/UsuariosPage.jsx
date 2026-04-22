@@ -51,9 +51,11 @@ export default function UsuariosPage() {
         email: user.email,
         rol: user.rol,
         estado: user.estado,
+        puedeAplicarDescuento: Boolean(user.puedeAplicarDescuento),
       });
     } else {
       form.resetFields();
+      form.setFieldsValue({ puedeAplicarDescuento: false });
     }
     setIsModalVisible(true);
   };
@@ -219,6 +221,26 @@ export default function UsuariosPage() {
                 </Form.Item>
              </Col>
           </Row>
+
+           <Form.Item noStyle shouldUpdate={(prev, cur) => prev.rol !== cur.rol}>
+            {({ getFieldValue }) => {
+              const rol = getFieldValue('rol');
+              if (rol !== 'cajero') return null;
+              return (
+               <Form.Item
+                name="puedeAplicarDescuento"
+                label="¿Puede aplicar descuento?"
+                initialValue={false}
+                tooltip="Si está en 'No', se oculta la opción de descuentos en Ventas para este cajero."
+               >
+                <Select>
+                  <Option value={true}>Sí</Option>
+                  <Option value={false}>No</Option>
+                </Select>
+               </Form.Item>
+              );
+            }}
+           </Form.Item>
         </Form>
       </Modal>
     </div>

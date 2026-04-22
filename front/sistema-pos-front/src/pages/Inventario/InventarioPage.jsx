@@ -11,7 +11,12 @@ import {
 import { toast } from 'react-hot-toast';
 import { useSearchParams } from 'react-router-dom';
 import { 
-  getProductos, createProducto, updateProducto, deleteProducto, getKardex 
+  getProductos,
+  createProducto,
+  updateProducto,
+  deleteProducto,
+  getKardex,
+  exportInventarioExcel,
 } from '../../api/inventario.api';
 import { getProveedores } from '../../api/proveedores.api';
 import { getCategorias } from '../../api/categorias.api';
@@ -61,6 +66,7 @@ export default function InventarioPage() {
   const [form] = Form.useForm();
   const { isAdmin, hasAnyRole } = useAuthStore();
   const canManage = hasAnyRole(['admin', 'inventario']);
+  const [exporting, setExporting] = useState(false);
 
   const [searchParams] = useSearchParams();
 
@@ -184,6 +190,37 @@ export default function InventarioPage() {
       toast.error('Error al cargar datos del inventario');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleExportExcel = async () => {
+    setExporting(true);
+    try {
+      const res = await exportInventarioExcel({
+        buscar: busqueda || undefined,
+        stockBajo: stockBajoFilter ? 'true' : undefined,
+      });
+
+      const blob = new Blob([res.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+
+      const pad2 = (n) => String(n).padStart(2, '0');
+      const now = new Date();
+      const fname = `inventario_${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}.xlsx`;
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fname;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err?.response?.data?.mensaje || 'Error al descargar Excel');
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -442,9 +479,14 @@ export default function InventarioPage() {
           <Text className="page-sub">Gestión de productos y control de stock centralizado.</Text>
         </div>
         {canManage && (
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => handleOpenModal()}>
-            Nuevo Producto
-          </Button>
+          <Space>
+            <Button loading={exporting} onClick={handleExportExcel}>
+              Descargar Excel
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => handleOpenModal()}>
+              Nuevo Producto
+            </Button>
+          </Space>
         )}
       </div>
 

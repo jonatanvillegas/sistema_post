@@ -7,7 +7,7 @@
   "scripts": {
     "start": "electron .",
     "dist": "npm --prefix front/sistema-pos-front run build && electron-builder",
-    "postinstall": "cd backend && npm install && cd ../front/sistema-pos-front && npm install"
+    "postinstall": "node scripts/postinstall.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

@@ -1,9 +1,23 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { registerSW } from 'virtual:pwa-register'
 import './index.css'
 import App from './App.jsx'
 
 console.log('🚀 Iniciando React App en main.jsx...');
+
+registerSW({
+  immediate: true,
+  onOfflineReady() {
+    console.log('📦 PWA lista para uso offline');
+  },
+  onNeedRefresh() {
+    console.log('🔄 Nueva versión disponible (recarga para actualizar)');
+  },
+  onRegisterError(error) {
+    console.error('❌ Error registrando Service Worker:', error);
+  },
+});
 
 try {
   const rootElement = document.getElementById('root');
