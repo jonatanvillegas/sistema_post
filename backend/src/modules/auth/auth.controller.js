@@ -37,6 +37,8 @@ const login = async (req, res) => {
         nombre: user.nombre,
         email: user.email,
         rol: user.rol,
+        estado: user.estado,
+        puedeAplicarDescuento: user.puedeAplicarDescuento,
       },
     });
   } catch (error) {
@@ -47,7 +49,7 @@ const login = async (req, res) => {
 // @POST /api/auth/register  (solo Admin)
 const register = async (req, res) => {
   try {
-    const { nombre, email, password, rol } = req.body;
+    const { nombre, email, password, rol, puedeAplicarDescuento } = req.body;
 
     if (!nombre || !email || !password) {
       return res.status(400).json({ mensaje: 'Nombre, email y contraseña son requeridos' });
@@ -58,7 +60,9 @@ const register = async (req, res) => {
       return res.status(400).json({ mensaje: 'El email ya está registrado' });
     }
 
-    const user = await User.create({ nombre, email, password, rol });
+    const nextRol = rol || 'cajero';
+    const flag = nextRol === 'cajero' ? Boolean(puedeAplicarDescuento) : true;
+    const user = await User.create({ nombre, email, password, rol: nextRol, puedeAplicarDescuento: flag });
 
     res.status(201).json({
       mensaje: 'Usuario creado correctamente',
@@ -68,6 +72,7 @@ const register = async (req, res) => {
         email: user.email,
         rol: user.rol,
         estado: user.estado,
+        puedeAplicarDescuento: user.puedeAplicarDescuento,
       },
     });
   } catch (error) {
@@ -83,6 +88,7 @@ const getMe = async (req, res) => {
     email: req.user.email,
     rol: req.user.rol,
     estado: req.user.estado,
+    puedeAplicarDescuento: req.user.puedeAplicarDescuento,
   });
 };
 
@@ -99,22 +105,44 @@ const getUsuarios = async (req, res) => {
 // @PUT /api/auth/usuarios/:id  (solo Admin)
 const updateUsuario = async (req, res) => {
   try {
-    const { nombre, email, rol, estado, password } = req.body;
+    const { nombre, email, rol, estado, password, puedeAplicarDescuento } = req.body;
     const user = await User.findById(req.params.id);
 
     if (!user) {
       return res.status(404).json({ mensaje: 'Usuario no encontrado' });
     }
 
+    const nextRol = rol ?? user.rol;
+
     user.nombre = nombre ?? user.nombre;
     user.email = email ?? user.email;
-    user.rol = rol ?? user.rol;
+    user.rol = nextRol;
     user.estado = estado ?? user.estado;
     if (password) user.password = password;
 
+    if (nextRol === 'cajero') {
+      if (puedeAplicarDescuento !== undefined) {
+        user.puedeAplicarDescuento = Boolean(puedeAplicarDescuento);
+      } else if (user.puedeAplicarDescuento === undefined) {
+        user.puedeAplicarDescuento = false;
+      }
+    } else {
+      user.puedeAplicarDescuento = true;
+    }
+
     await user.save();
 
-    res.json({ mensaje: 'Usuario actualizado', usuario: { _id: user._id, nombre: user.nombre, email: user.email, rol: user.rol, estado: user.estado } });
+    res.json({
+      mensaje: 'Usuario actualizado',
+      usuario: {
+        _id: user._id,
+        nombre: user.nombre,
+        email: user.email,
+        rol: user.rol,
+        estado: user.estado,
+        puedeAplicarDescuento: user.puedeAplicarDescuento,
+      },
+    });
   } catch (error) {
     res.status(500).json({ mensaje: 'Error al actualizar usuario', error: error.message });
   }

@@ -46,7 +46,9 @@ app.use('/api/categorias', categoriasRoutes);
 
 // Servir frontend (build Vite) si existe.
 // Esto permite desplegar en un solo servicio (Coolify) con UI + API en el mismo dominio.
-const frontDistPath = path.join(__dirname, '..', '..', 'front', 'sistema-pos-front', 'dist');
+const frontDistPath = process.env.FRONT_DIST_PATH
+  ? path.resolve(process.env.FRONT_DIST_PATH)
+  : path.join(__dirname, '..', '..', 'front', 'sistema-pos-front', 'dist');
 const frontIndexPath = path.join(frontDistPath, 'index.html');
 const hasFrontend = fs.existsSync(frontIndexPath);
 

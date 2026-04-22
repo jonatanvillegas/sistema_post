@@ -25,6 +25,12 @@ const userSchema = new mongoose.Schema(
       enum: ['admin', 'cajero', 'inventario'],
       default: 'cajero',
     },
+    // Si el rol es cajero, este flag controla si puede aplicar descuentos.
+    // Admin siempre puede aplicar descuentos (se valida en la lógica de negocio).
+    puedeAplicarDescuento: {
+      type: Boolean,
+      default: false,
+    },
     estado: {
       type: Boolean,
       default: true,

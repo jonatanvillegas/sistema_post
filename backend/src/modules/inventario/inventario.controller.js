@@ -1,4 +1,5 @@
 const { Producto, Kardex } = require('./producto.model');
+const ExcelJS = require('exceljs');
 
 const isControlaStock = (producto) => producto?.controlaStock !== false;
 
@@ -152,4 +153,92 @@ const getKardex = async (req, res) => {
   }
 };
 
-module.exports = { getProductos, getStockBajo, getProductoById, createProducto, updateProducto, deleteProducto, getKardex };
+// @GET /api/inventario/export/excel
+const exportInventarioExcel = async (req, res) => {
+  try {
+    const { buscar, categoria, stockBajo } = req.query;
+    const filtro = { estado: true };
+
+    if (buscar) {
+      filtro.$or = [
+        { nombre: { $regex: buscar, $options: 'i' } },
+        { codigo: { $regex: buscar, $options: 'i' } },
+      ];
+    }
+    if (categoria) filtro.categoria = categoria;
+    if (stockBajo === 'true') {
+      filtro.controlaStock = { $ne: false };
+      filtro.$expr = { $lte: ['$stock', '$stockMinimo'] };
+    }
+
+    const productos = await Producto.find(filtro)
+      .populate('proveedorId', 'nombre')
+      .sort({ nombre: 1 })
+      .lean();
+
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'Sistema POS';
+    wb.created = new Date();
+
+    const ws = wb.addWorksheet('Inventario');
+
+    ws.columns = [
+      { header: 'Código', key: 'codigo', width: 18 },
+      { header: 'Producto', key: 'nombre', width: 34 },
+      { header: 'Categoría', key: 'categoria', width: 18 },
+      { header: 'Proveedor', key: 'proveedor', width: 24 },
+      { header: 'Precio compra', key: 'precioCompra', width: 14 },
+      { header: 'Precio venta', key: 'precioVenta', width: 14 },
+      { header: 'Controla stock', key: 'controlaStock', width: 14 },
+      { header: 'Stock', key: 'stock', width: 10 },
+      { header: 'Stock mínimo', key: 'stockMinimo', width: 12 },
+    ];
+
+    ws.getRow(1).font = { bold: true };
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+
+    for (const p of productos) {
+      ws.addRow({
+        codigo: p?.codigo || '',
+        nombre: p?.nombre || '',
+        categoria: p?.categoria || 'General',
+        proveedor: p?.proveedorId?.nombre || '',
+        precioCompra: Number(p?.precioCompra) || 0,
+        precioVenta: Number(p?.precioVenta) || 0,
+        controlaStock: p?.controlaStock === false ? 'No' : 'Sí',
+        stock: Number(p?.stock) || 0,
+        stockMinimo: Number(p?.stockMinimo) || 0,
+      });
+    }
+
+    // Format numeric columns
+    ws.getColumn('precioCompra').numFmt = '#,##0.00';
+    ws.getColumn('precioVenta').numFmt = '#,##0.00';
+    ws.getColumn('stock').numFmt = '#,##0';
+    ws.getColumn('stockMinimo').numFmt = '#,##0';
+
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const now = new Date();
+    const fname = `inventario_${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}.xlsx`;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
+    res.setHeader('Cache-Control', 'no-store');
+
+    await wb.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    res.status(500).json({ mensaje: 'Error al exportar inventario', error: error.message });
+  }
+};
+
+module.exports = {
+  getProductos,
+  getStockBajo,
+  getProductoById,
+  createProducto,
+  updateProducto,
+  deleteProducto,
+  getKardex,
+  exportInventarioExcel,
+};

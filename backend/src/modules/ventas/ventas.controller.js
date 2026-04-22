@@ -166,6 +166,25 @@ const createVenta = async (req, res) => {
       return res.status(400).json({ mensaje: 'La venta debe tener al menos un producto' });
     }
 
+    // Permiso de descuentos: Admin siempre puede; Cajero solo si está habilitado por el Admin.
+    const rol = String(req.user?.rol || '');
+    const canApplyDiscount = rol === 'admin' || (rol === 'cajero' && req.user?.puedeAplicarDescuento === true);
+    if (!canApplyDiscount) {
+      const hasGeneralDiscount =
+        (descuentoGeneralTipo && String(descuentoGeneralTipo) !== 'ninguno' && Number(descuentoGeneralValor) > 0) ||
+        Number(descuento) > 0;
+      const hasLineDiscount = Array.isArray(productos)
+        ? productos.some((it) => {
+            const tipo = String(it?.descuentoTipo || 'ninguno');
+            const val = Number(it?.descuentoValor || 0);
+            return tipo !== 'ninguno' && val > 0;
+          })
+        : false;
+      if (hasGeneralDiscount || hasLineDiscount) {
+        return res.status(403).json({ mensaje: 'No tiene permiso para aplicar descuentos' });
+      }
+    }
+
     // 0. Caja debe estar abierta para cualquier venta/pedido
     const cajaActiva = await Caja.findOne({ estado: 'abierta' });
     if (!cajaActiva) {
