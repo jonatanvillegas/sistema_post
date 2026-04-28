@@ -4,6 +4,7 @@ import { PrivateRoute } from '../components/PrivateRoute';
 import LoginPage from '../pages/Login/LoginPage';
 import DashboardPage from '../pages/Dashboard/DashboardPage';
 import VentasPage from '../pages/Ventas/VentasPage';
+import VentasHistoryPage from '../pages/Ventas/VentasHistoryPage';
 import InventarioPage from '../pages/Inventario/InventarioPage';
 import CajaPage from '../pages/Caja/CajaPage';
 import ProveedoresPage from '../pages/Proveedores/ProveedoresPage';
@@ -36,6 +37,7 @@ export default function AppRouter() {
             {/* Cajero */}
             <Route element={<PrivateRoute allowedRoles={["admin", "cajero"]} />}>
               <Route path="/ventas" element={<VentasPage />} />
+              <Route path="/ventas/historial" element={<VentasHistoryPage />} />
               <Route path="/caja" element={<CajaPage />} />
               <Route path="/caja/arqueo" element={<ArqueoPage />} />
               <Route path="/clientes" element={<ClientesPage />} />

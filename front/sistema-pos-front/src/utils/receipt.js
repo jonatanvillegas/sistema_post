@@ -1,34 +1,21 @@
-const escapeHtml = (value) => {
-  const str = String(value ?? '');
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-};
-
-const formatMoney = (value) => {
-  const n = Number(value || 0);
-  return n.toFixed(2);
-};
-
-const formatDate = (value) => {
-  try {
-    const d = value ? new Date(value) : new Date();
-    return d.toLocaleString();
-  } catch {
-    return String(value || '');
-  }
-};
-
 export function buildReceiptHtml(venta, options = {}) {
   const widthMm = Number(options.widthMm || 58);
-  const title = options.title || 'RECIBO DE VENTA';
-  const storeName = options.storeName || 'Sistema POS';
+  const charsPerLine = widthMm >= 80 ? 42 : 32; 
 
+  const ESC = '\x1B';
+  const CMD = {
+    INIT: ESC + '@',
+    CENTER: ESC + 'a' + '\x01',
+    LEFT: ESC + 'a' + '\x00',
+    BOLD_ON: ESC + 'E' + '\x01',
+    BOLD_OFF: ESC + 'E' + '\x00',
+  };
+
+  const storeName = (options.storeName || 'SISTEMA POS').toUpperCase();
+  const title = (options.title || 'TICKET DE VENTA').toUpperCase();
   const numero = venta?.numeroVenta ?? '';
   const fecha = venta?.fecha || venta?.createdAt || new Date().toISOString();
+  const dateStr = new Date(fecha).toLocaleString();
 
   const productos = Array.isArray(venta?.productos) ? venta.productos : [];
 
@@ -36,88 +23,99 @@ export function buildReceiptHtml(venta, options = {}) {
   const descuento = Number(venta?.descuento || 0);
   const total = Number(venta?.total || 0);
 
-  const metodoPago = venta?.metodoPago || 'efectivo';
+  const metodoPago = (venta?.metodoPago || 'efectivo').toUpperCase();
   const montoRecibido = Number(venta?.montoRecibido || 0);
   const vuelto = Number(venta?.vuelto || 0);
+  const clienteNombre = (venta?.cliente?.nombre || 'CONSUMIDOR FINAL').toUpperCase();
 
-  const clienteNombre = venta?.cliente?.nombre || 'Consumidor Final';
+  const center = (text) => {
+    const spaces = Math.max(0, Math.floor((charsPerLine - text.length) / 2));
+    return ' '.repeat(spaces) + text;
+  };
 
-  const itemsHtml = productos
-    .map((p) => {
-      const nombre = escapeHtml(p?.nombre || '');
-      const qty = Number(p?.cantidad || 0);
-      const unit = Number(p?.precioUnitario || 0);
-      const sub = Number(p?.subtotal || qty * unit);
-      return `
-        <div class="row item">
-          <div class="name">${nombre}</div>
-          <div class="meta">
-            <span>${qty} x ${formatMoney(unit)}</span>
-            <span>${formatMoney(sub)}</span>
-          </div>
-        </div>
-      `;
-    })
-    .join('');
+  const justify = (left, right) => {
+    const spaces = Math.max(1, charsPerLine - left.length - right.length);
+    return left + ' '.repeat(spaces) + right;
+  };
+
+  const line = () => '-'.repeat(charsPerLine);
+
+  const formatMoney = (val) => Number(val || 0).toFixed(2);
+
+  // 🔥 INICIALIZAR IMPRESORA (IMPORTANTE)
+  let text = CMD.INIT;
+
+  // ENCABEZADO
+  text += CMD.CENTER;
+  text += CMD.BOLD_ON;
+  text += storeName + '\n';
+  text += CMD.BOLD_OFF;
+  text += title + '\n';
+  text += dateStr + '\n';
+
+  text += CMD.LEFT;
+  text += line() + '\n';
+
+  text += `TICKET:   ${numero}\n`;
+  text += `CLIENTE:  ${clienteNombre.slice(0, charsPerLine - 10)}\n`;
+  text += `PAGO:     ${metodoPago}\n`;
+
+  text += line() + '\n';
+
+  // PRODUCTOS
+  productos.forEach(p => {
+    const nombre = (p?.nombre || '').toUpperCase();
+    const qty = Number(p?.cantidad || 0);
+    const unit = Number(p?.precioUnitario || 0);
+    const sub = Number(p?.subtotal || qty * unit);
+
+    text += nombre.slice(0, charsPerLine) + '\n';
+    text += justify(`${qty} x ${formatMoney(unit)}`, formatMoney(sub)) + '\n';
+  });
+
+  text += line() + '\n';
+
+  // TOTALES
+  text += justify('DESCUENTO:', formatMoney(descuento)) + '\n';
+  text += justify('TOTAL:', formatMoney(total)) + '\n';
+
+  text += line() + '\n';
+
+  text += justify('RECIBIDO:', formatMoney(montoRecibido)) + '\n';
+  text += justify('VUELTO:', formatMoney(vuelto)) + '\n';
+
+  text += '\n';
+
+  // PIE
+  text += CMD.CENTER;
+  text += 'GRACIAS POR SU COMPRA\n';
+
+  text += '\n\n\n'; // solo espacio final para corte
 
   return `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Recibo ${escapeHtml(numero)}</title>
   <style>
-    @page { size: ${widthMm}mm auto; margin: 2mm; }
-    html, body { width: ${widthMm}mm; }
-    body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; margin: 0; padding: 0; color: #000; }
-    .center { text-align: center; }
-    .muted { opacity: .75; }
-    .sep { border-top: 1px dashed #000; margin: 8px 0; }
-    .row { display: flex; flex-direction: column; gap: 2px; }
-    .meta { display: flex; justify-content: space-between; }
-    .totals { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; }
-    .totals .label { opacity: .85; }
-    .totals .val { text-align: right; }
-    .big { font-size: 14px; font-weight: 700; }
-    .foot { margin-top: 10px; }
+    @page { size: ${widthMm}mm auto; margin: 0; }
+    body { 
+      width: ${widthMm}mm; 
+      margin: 0; 
+      padding: 0; 
+      background: #fff;
+    }
+    pre { 
+      margin: 0; 
+      padding: 0; 
+      font-family: 'Courier New', monospace; 
+      font-size: 11px; 
+      line-height: 1.1;
+      white-space: pre-wrap; 
+    }
   </style>
 </head>
 <body>
-  <div class="center">
-    <div class="big">${escapeHtml(storeName)}</div>
-    <div>${escapeHtml(title)}</div>
-    <div class="muted">${escapeHtml(formatDate(fecha))}</div>
-  </div>
-
-  <div class="sep"></div>
-
-  <div class="row">
-    <div><b>Venta:</b> ${escapeHtml(numero)}</div>
-    <div><b>Cliente:</b> ${escapeHtml(clienteNombre)}</div>
-    <div><b>Pago:</b> ${escapeHtml(metodoPago.toUpperCase())}</div>
-  </div>
-
-  <div class="sep"></div>
-
-  ${itemsHtml || '<div class="muted">(Sin productos)</div>'}
-
-  <div class="sep"></div>
-
-  <div class="totals">
-    <div class="label">Subtotal</div><div class="val">${formatMoney(subtotal)}</div>
-    <div class="label">Descuento</div><div class="val">${formatMoney(descuento)}</div>
-    <div class="label big">TOTAL</div><div class="val big">${formatMoney(total)}</div>
-  </div>
-
-  <div class="sep"></div>
-
-  <div class="totals">
-    <div class="label">Recibido</div><div class="val">${formatMoney(montoRecibido)}</div>
-    <div class="label">Vuelto</div><div class="val">${formatMoney(vuelto)}</div>
-  </div>
-
-  <div class="foot center muted">
-    Gracias por su compra
-  </div>
+  <pre>${text}</pre>
 </body>
 </html>`;
 }

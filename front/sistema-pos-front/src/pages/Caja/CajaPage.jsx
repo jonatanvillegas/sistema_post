@@ -17,6 +17,7 @@ import {
 } from '../../api/caja.api';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 import { useCajaStore } from '../../store/cajaStore';
+import { useAuthStore } from '../../store/authStore';
 
 const { Title, Text } = Typography;
 
@@ -33,9 +34,11 @@ export default function CajaPage() {
   const [isModalDetalleVisible, setIsModalDetalleVisible] = useState(false);
   const [selectedCajaHistorial, setSelectedCajaHistorial] = useState(null);
   const [loadingReporte, setLoadingReporte] = useState(false);
+  const [loadingEgreso, setLoadingEgreso] = useState(false);
   
   const [form] = Form.useForm();
   const { cajaActual, setCajaActual, limpiarCaja } = useCajaStore();
+  const { isAdmin, isCajero } = useAuthStore();
 
   useEffect(() => {
     fetchCajaActual();
@@ -87,13 +90,18 @@ export default function CajaPage() {
   };
 
   const handleEgreso = async (values) => {
+    if (loadingEgreso) return;
+    setLoadingEgreso(true);
     try {
       await registrarEgreso(values);
       toast.success('Egreso registrado correctamente');
       setIsModalEgresoVisible(false);
+      form.resetFields();
       fetchCajaActual();
     } catch (err) {
       toast.error(err.response?.data?.mensaje || 'Error al registrar egreso');
+    } finally {
+      setLoadingEgreso(false);
     }
   };
 
@@ -417,7 +425,19 @@ export default function CajaPage() {
         title="Registrar Egreso"
         open={isModalEgresoVisible}
         onCancel={() => setIsModalEgresoVisible(false)}
-        onOk={() => form.submit()}
+        footer={[
+          <Button key="cancel" onClick={() => setIsModalEgresoVisible(false)}>
+            Cancelar
+          </Button>,
+          <Button 
+            key="submit" 
+            type="primary" 
+            loading={loadingEgreso} 
+            onClick={() => form.submit()}
+          >
+            Registrar Egreso
+          </Button>
+        ]}
       >
         <Form form={form} layout="vertical" onFinish={handleEgreso}>
           <Form.Item name="monto" label="Monto" rules={[{ required: true }]}>

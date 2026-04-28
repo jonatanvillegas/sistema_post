@@ -17,7 +17,7 @@ router.put('/cerrar/:id', protect, cerrarCaja);
 router.get('/actual', protect, getCajaActual);
 router.post('/egreso', protect, registrarEgreso);
 router.get('/transacciones/export', protect, authorizeRoles('admin', 'cajero'), exportTransaccionesCaja);
-router.get('/historial', protect, authorizeRoles('admin'), getHistorialCaja);
+router.get('/historial', protect, authorizeRoles('admin', 'cajero'), getHistorialCaja);
 router.get('/:id', protect, getCajaById);
 
 module.exports = router;

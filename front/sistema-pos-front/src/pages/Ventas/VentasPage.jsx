@@ -8,7 +8,8 @@ import {
   SearchOutlined, PlusOutlined, CloseOutlined, 
   DeleteOutlined, ShoppingCartOutlined, DollarOutlined,
   BarcodeOutlined, UserOutlined, ArrowRightOutlined,
-  CheckCircleOutlined, PrinterOutlined, CreditCardOutlined
+  CheckCircleOutlined, PrinterOutlined, CreditCardOutlined,
+  EyeOutlined
 } from '@ant-design/icons';
 import { toast } from 'react-hot-toast';
 import { getProductos } from '../../api/inventario.api';
@@ -20,11 +21,13 @@ import { useAuthStore } from '../../store/authStore';
 import { formatCurrency } from '../../utils/formatters';
 import { buildReceiptHtml } from '../../utils/receipt';
 import { getPrintSettings } from '../../utils/printSettings';
+import { useNavigate } from 'react-router-dom';
 
 const { Title, Text, Paragraph } = Typography;
 const { Option } = Select;
 
 export default function VentasPage() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [productos, setProductos] = useState([]);
   const [busqueda, setBusqueda] = useState('');
@@ -32,15 +35,9 @@ export default function VentasPage() {
   const [montoRecibido, setMontoRecibido] = useState(0);
   const [metodoPago, setMetodoPago] = useState('efectivo');
 
-  const [isVentasModalVisible, setIsVentasModalVisible] = useState(false);
-  const [ventasRecientesLoading, setVentasRecientesLoading] = useState(false);
-  const [ventasRecientes, setVentasRecientes] = useState([]);
-  const [ventasRecientesTotal, setVentasRecientesTotal] = useState(0);
-  const [ventasRecientesPage, setVentasRecientesPage] = useState(1);
-  const [ventasRecientesLimit, setVentasRecientesLimit] = useState(20);
-  const [ventasFiltroBuscar, setVentasFiltroBuscar] = useState('');
-  const [ventasFiltroEstado, setVentasFiltroEstado] = useState(undefined);
   const [ventasFiltroRango, setVentasFiltroRango] = useState(null);
+  const [isDetalleModalVisible, setIsDetalleModalVisible] = useState(false);
+  const [ventaSeleccionada, setVentaSeleccionada] = useState(null);
 
   // Buscador de Clientes
   const [clientesBusqueda, setClientesBusqueda] = useState([]);
@@ -58,39 +55,8 @@ export default function VentasPage() {
   const canApplyDiscount = useAuthStore((s) => s.canApplyDiscount);
   const searchInputRef = useRef(null);
 
-  const loadVentasHistorial = async (next = {}) => {
-    const page = next.page ?? ventasRecientesPage;
-    const limit = next.limit ?? ventasRecientesLimit;
-
-    const [d0, d1] = Array.isArray(ventasFiltroRango) ? ventasFiltroRango : [];
-    const desde = d0?.format ? d0.format('YYYY-MM-DD') : undefined;
-    const hasta = d1?.format ? d1.format('YYYY-MM-DD') : undefined;
-
-    setVentasRecientesLoading(true);
-    try {
-      const { data } = await getVentas({
-        page,
-        limit,
-        buscar: ventasFiltroBuscar || undefined,
-        estado: ventasFiltroEstado || undefined,
-        desde,
-        hasta,
-      });
-      setVentasRecientes(Array.isArray(data?.ventas) ? data.ventas : []);
-      setVentasRecientesTotal(Number(data?.total) || 0);
-      setVentasRecientesPage(Number(data?.pagina) || page);
-      setVentasRecientesLimit(Number(limit) || 20);
-    } catch (err) {
-      toast.error(err?.response?.data?.mensaje || 'Error cargando historial');
-    } finally {
-      setVentasRecientesLoading(false);
-    }
-  };
-
-  const openVentasRecientes = async () => {
-    setIsVentasModalVisible(true);
-    setVentasRecientesPage(1);
-    await loadVentasHistorial({ page: 1 });
+  const openVentasRecientes = () => {
+    navigate('/ventas/historial');
   };
 
   const anularVentaHistorial = async (venta) => {
@@ -129,6 +95,43 @@ export default function VentasPage() {
         await loadVentasHistorial({ page: ventasRecientesPage });
       },
     });
+  };
+
+  const handleVerDetalle = (venta) => {
+    setVentaSeleccionada(venta);
+    setIsDetalleModalVisible(true);
+  };
+
+  const handleReimprimirVenta = async (venta) => {
+    try {
+      const settings = getPrintSettings();
+      const html = buildReceiptHtml(venta, {
+        widthMm: settings.paperWidthMm || 58,
+        storeName: 'Sistema POS',
+      });
+      
+      if (window?.electronAPI?.printReceipt) {
+        const r = await window.electronAPI.printReceipt(html, {
+          silent: Boolean(settings.silent),
+          deviceName: settings.deviceName || undefined,
+          copies: settings.copies || 1,
+          printBackground: true,
+        });
+        if (r && r.ok === false) throw new Error(r.error || 'No se pudo imprimir');
+      } else {
+        const w = window.open('', '_blank');
+        if (!w) throw new Error('Ventana de impresión bloqueada');
+        w.document.open();
+        w.document.write(html);
+        w.document.close();
+        w.focus();
+        w.print();
+        w.close();
+      }
+      toast.success('Enviado a impresión');
+    } catch (err) {
+      toast.error(err?.message || 'Error al imprimir');
+    }
   };
 
   const currentTab = useMemo(() => getPestanaActiva(), [pestanas, pestanaActiva]);
@@ -695,139 +698,6 @@ export default function VentasPage() {
       </div>
 
       <Modal
-        title="Historial de pedidos"
-        open={isVentasModalVisible}
-        onCancel={() => setIsVentasModalVisible(false)}
-        footer={null}
-        width={900}
-        destroyOnClose
-      >
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-          <Input
-            placeholder="Buscar (VTA-000123 / cliente / NIT)"
-            value={ventasFiltroBuscar}
-            onChange={(e) => setVentasFiltroBuscar(e.target.value)}
-            style={{ width: 260 }}
-            allowClear
-            onPressEnter={() => loadVentasHistorial({ page: 1 })}
-          />
-          <Select
-            placeholder="Estado"
-            value={ventasFiltroEstado}
-            onChange={(v) => setVentasFiltroEstado(v)}
-            style={{ width: 160 }}
-            allowClear
-            options={[
-              { value: 'completada', label: 'Completadas' },
-              { value: 'anulada', label: 'Anuladas' },
-            ]}
-          />
-          <DatePicker.RangePicker
-            value={ventasFiltroRango}
-            onChange={(r) => setVentasFiltroRango(r)}
-            format="YYYY-MM-DD"
-            allowClear
-          />
-          <Button type="primary" onClick={() => loadVentasHistorial({ page: 1 })}>
-            Buscar
-          </Button>
-          <Button
-            onClick={async () => {
-              setVentasFiltroBuscar('');
-              setVentasFiltroEstado(undefined);
-              setVentasFiltroRango(null);
-              setVentasRecientesPage(1);
-              await loadVentasHistorial({ page: 1 });
-            }}
-          >
-            Limpiar
-          </Button>
-        </div>
-
-        <Table
-          rowKey="_id"
-          loading={ventasRecientesLoading}
-          dataSource={ventasRecientes}
-          pagination={{
-            current: ventasRecientesPage,
-            pageSize: ventasRecientesLimit,
-            total: ventasRecientesTotal,
-            showSizeChanger: true,
-            onChange: (page, pageSize) => {
-              setVentasRecientesPage(page);
-              setVentasRecientesLimit(pageSize);
-              loadVentasHistorial({ page, limit: pageSize });
-            },
-          }}
-          size="middle"
-          columns={[
-            {
-              title: 'Venta',
-              dataIndex: 'numeroVenta',
-              key: 'numeroVenta',
-              render: (v) => <Text strong>{v}</Text>,
-            },
-            {
-              title: 'Fecha',
-              dataIndex: 'fecha',
-              key: 'fecha',
-              render: (v) => <Text>{v ? new Date(v).toLocaleString() : '-'}</Text>,
-            },
-            {
-              title: 'Cliente',
-              dataIndex: ['cliente', 'nombre'],
-              key: 'cliente',
-              render: (_v, r) => <Text>{r?.cliente?.nombre || 'Consumidor Final'}</Text>,
-            },
-            {
-              title: 'Pago',
-              dataIndex: 'metodoPago',
-              key: 'metodoPago',
-              render: (v) => <Tag>{String(v || '').toUpperCase()}</Tag>,
-            },
-            {
-              title: 'Total',
-              dataIndex: 'total',
-              key: 'total',
-              align: 'right',
-              render: (v) => <Text strong>{formatCurrency(Number(v) || 0)}</Text>,
-            },
-            {
-              title: 'Estado',
-              dataIndex: 'estado',
-              key: 'estado',
-              render: (v) => (
-                <Tag color={v === 'anulada' ? 'red' : 'green'}>{v === 'anulada' ? 'ANULADA' : 'COMPLETADA'}</Tag>
-              ),
-            },
-            {
-              title: '',
-              key: 'actions',
-              align: 'right',
-              render: (_v, r) => (
-                <Button
-                  size="small"
-                  danger
-                  disabled={!isAdmin() || r?.estado === 'anulada'}
-                  onClick={() => anularVentaHistorial(r)}
-                >
-                  Anular
-                </Button>
-              ),
-            },
-          ]}
-        />
-        {!isAdmin() && (
-          <Alert
-            style={{ marginTop: 12 }}
-            type="info"
-            message="Solo un administrador puede corregir/anular ventas."
-            showIcon
-          />
-        )}
-      </Modal>
-
-      <Modal
         title={<Title level={3} style={{ margin: 0, textAlign: 'center' }}>Finalizar Venta</Title>}
         open={isModalPagoVisible}
         onCancel={() => setIsModalPagoVisible(false)}
@@ -903,6 +773,125 @@ export default function VentasPage() {
         >
           CONFIRMAR TRANSACCIÓN
         </Button>
+      </Modal>
+
+      {/* Modal Detalle de Venta */}
+      <Modal
+        title={`Detalle de Venta: ${ventaSeleccionada?.numeroVenta}`}
+        open={isDetalleModalVisible}
+        onCancel={() => setIsDetalleModalVisible(false)}
+        footer={[
+          <Button key="close" onClick={() => setIsDetalleModalVisible(false)}>
+            Cerrar
+          </Button>,
+          <Button 
+            key="print" 
+            type="primary" 
+            icon={<PrinterOutlined />} 
+            onClick={() => handleReimprimirVenta(ventaSeleccionada)}
+          >
+            Reimprimir Recibo
+          </Button>
+        ]}
+        width={700}
+        destroyOnClose
+      >
+        {ventaSeleccionada && (
+          <div>
+            <Row gutter={16} style={{ marginBottom: 20 }}>
+              <Col span={12}>
+                <Text type="secondary">Cliente:</Text>
+                <br />
+                <Text strong>{ventaSeleccionada.cliente?.nombre || 'Consumidor Final'}</Text>
+                <br />
+                <Text type="secondary">Fecha:</Text>
+                <br />
+                <Text>{new Date(ventaSeleccionada.fecha).toLocaleString()}</Text>
+              </Col>
+              <Col span={12} style={{ textAlign: 'right' }}>
+                <Text type="secondary">Estado:</Text>
+                <br />
+                <Tag color={ventaSeleccionada.estado === 'anulada' ? 'red' : 'green'}>
+                  {ventaSeleccionada.estado?.toUpperCase()}
+                </Tag>
+                <br />
+                <Text type="secondary">Método de Pago:</Text>
+                <br />
+                <Tag>{ventaSeleccionada.metodoPago?.toUpperCase()}</Tag>
+              </Col>
+            </Row>
+
+            <Table
+              dataSource={ventaSeleccionada.productos || []}
+              rowKey={(r) => r.productoId?._id || r.productoId}
+              pagination={false}
+              size="small"
+              columns={[
+                {
+                  title: 'Producto',
+                  dataIndex: ['productoId', 'nombre'],
+                  key: 'nombre',
+                  render: (v, r) => v || r.nombre || 'Producto'
+                },
+                {
+                  title: 'Cant.',
+                  dataIndex: 'cantidad',
+                  key: 'cantidad',
+                  align: 'center',
+                },
+                {
+                  title: 'Precio',
+                  dataIndex: 'precioUnitario',
+                  key: 'precio',
+                  align: 'right',
+                  render: (v) => formatCurrency(v)
+                },
+                {
+                  title: 'Desc.',
+                  key: 'descuento',
+                  align: 'right',
+                  render: (_, r) => formatCurrency(r.descuentoMonto || 0)
+                },
+                {
+                  title: 'Subtotal',
+                  dataIndex: 'subtotal',
+                  key: 'subtotal',
+                  align: 'right',
+                  render: (v) => <Text strong>{formatCurrency(v)}</Text>
+                }
+              ]}
+            />
+
+            <Divider />
+
+            <div style={{ textAlign: 'right' }}>
+              <Space direction="vertical" style={{ width: '100%' }}>
+                <Row justify="end">
+                  <Col span={8}><Text>Subtotal:</Text></Col>
+                  <Col span={6}><Text>{formatCurrency(ventaSeleccionada.subtotal)}</Text></Col>
+                </Row>
+                <Row justify="end">
+                  <Col span={8}><Text>Descuento:</Text></Col>
+                  <Col span={6}><Text style={{ color: '#f5222d' }}>-{formatCurrency(ventaSeleccionada.descuentoTotal)}</Text></Col>
+                </Row>
+                <Row justify="end">
+                  <Col span={8}><Title level={4} style={{ margin: 0 }}>TOTAL:</Title></Col>
+                  <Col span={6}><Title level={4} style={{ margin: 0, color: '#1677ff' }}>{formatCurrency(ventaSeleccionada.total)}</Title></Col>
+                </Row>
+              </Space>
+            </div>
+            
+            {ventaSeleccionada.estado === 'anulada' && (
+              <Alert
+                message="Venta Anulada"
+                description={`Motivo: ${ventaSeleccionada.motivoAnulacion || 'No especificado'}`}
+                type="error"
+                showIcon
+                style={{ marginTop: 20 }}
+              />
+            )}
+          </div>
+        )}
       </Modal>
     </div>
   );

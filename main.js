@@ -182,11 +182,20 @@ async function printReceiptHtml({ html, options }) {
     safeOptions.copies = options.copies;
   }
 
+  // Usar archivo temporal para evitar límites de longitud en data: URLs
+  const tempPath = path.join(app.getPath('temp'), `pos_receipt_${Date.now()}.html`);
+  fs.writeFileSync(tempPath, html, 'utf8');
+
   return new Promise((resolve, reject) => {
     let settled = false;
     const settle = (err) => {
       if (settled) return;
       settled = true;
+      try {
+        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+      } catch (e) {
+        log('WARN', 'No se pudo borrar archivo temporal de recibo', e.message);
+      }
       try {
         if (!printWindow.isDestroyed()) printWindow.close();
       } catch {
@@ -211,11 +220,10 @@ async function printReceiptHtml({ html, options }) {
         } catch (err) {
           settle(err);
         }
-      }, 150);
+      }, 250); // Aumentado ligeramente para seguridad
     });
 
-    const url = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
-    printWindow.loadURL(url).catch((err) => settle(err));
+    printWindow.loadFile(tempPath).catch((err) => settle(err));
   });
 }
 
