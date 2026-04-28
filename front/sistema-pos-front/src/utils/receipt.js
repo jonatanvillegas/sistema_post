@@ -42,7 +42,7 @@ export function buildReceiptHtml(venta, options = {}) {
 
   const formatMoney = (val) => Number(val || 0).toFixed(2);
 
-  // 🔥 INICIALIZAR IMPRESORA (IMPORTANTE)
+  // 🔥 INICIALIZAR IMPRESORA
   let text = CMD.INIT;
 
   // ENCABEZADO
@@ -90,7 +90,10 @@ export function buildReceiptHtml(venta, options = {}) {
   text += CMD.CENTER;
   text += 'GRACIAS POR SU COMPRA\n';
 
-  text += '\n\n\n'; // solo espacio final para corte
+  text += '\n\n\n';
+
+  // 🔥 LIMPIAR COMANDOS ESC/POS PARA HTML/PDF
+  const cleanText = text.replace(/\x1B[@aE][\x00\x01]?/g, '');
 
   return `<!doctype html>
 <html>
@@ -106,7 +109,7 @@ export function buildReceiptHtml(venta, options = {}) {
     }
     pre { 
       margin: 0; 
-      padding: 0; 
+      padding: 0 3mm; 
       font-family: 'Courier New', monospace; 
       font-size: 11px; 
       line-height: 1.1;
@@ -115,7 +118,7 @@ export function buildReceiptHtml(venta, options = {}) {
   </style>
 </head>
 <body>
-  <pre>${text}</pre>
+  <pre>${cleanText}</pre>
 </body>
 </html>`;
 }
