@@ -55,6 +55,10 @@ const productoSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    imagen: {
+      type: String,
+      default: null,
+    },
   },
   { timestamps: true }
 );

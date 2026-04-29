@@ -15,6 +15,8 @@ const clientesRoutes = require('./modules/clientes/clientes.routes');
 const creditosRoutes = require('./modules/creditos/creditos.routes');
 const adminRoutes = require('./modules/admin/admin.routes');
 const categoriasRoutes = require('./modules/categorias/categorias.routes');
+const auditRoutes = require('./modules/audit/audit.routes');
+const configRoutes = require('./modules/config/config.routes');
 
 const app = express();
 
@@ -22,6 +24,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
+// Servir archivos estáticos (Imágenes de productos)
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
@@ -43,6 +48,8 @@ app.use('/api/clientes', clientesRoutes);
 app.use('/api/creditos', creditosRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/categorias', categoriasRoutes);
+app.use('/api/audit', auditRoutes);
+app.use('/api/config', configRoutes);
 
 // Servir frontend (build Vite) si existe.
 // Esto permite desplegar en un solo servicio (Coolify) con UI + API en el mismo dominio.

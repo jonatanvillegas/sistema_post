@@ -1,4 +1,5 @@
 const Caja = require('./caja.model');
+const { recordAudit } = require('../audit/audit.controller');
 
 const toCents = (value) => Math.round((Number(value) || 0) * 100);
 const fromCents = (cents) => Number((Number(cents || 0) / 100).toFixed(2));
@@ -40,27 +41,58 @@ const formatIso = (d) => {
   }
 };
 
+const Config = require('../config/config.model');
+
 // @POST /api/caja/abrir
 const abrirCaja = async (req, res) => {
   try {
-    const { montoInicial, observaciones } = req.body;
+    const { montoInicial, observaciones, nombreCaja } = req.body;
 
-    // Verificar que no haya caja abierta
-    const cajaActiva = await Caja.findOne({ estado: 'abierta' });
-    if (cajaActiva) {
-      return res.status(400).json({
-        mensaje: 'Ya existe una caja abierta',
-        caja: cajaActiva,
+    // Obtener configuración del sistema
+    let config = await Config.findOne();
+    if (!config) config = await Config.create({});
+
+    if (config.tipoSistema === 'online') {
+      // En modo ONLINE, validamos que EL USUARIO no tenga ya una caja abierta
+      const cajaUsuario = await Caja.findOne({ 
+        usuarioApertura: req.user._id, 
+        estado: 'abierta' 
       });
+      
+      if (cajaUsuario) {
+        return res.status(400).json({
+          mensaje: 'Usted ya tiene una caja abierta.',
+          caja: cajaUsuario,
+        });
+      }
+    } else {
+      // En modo DESKTOP (única), validamos que NO HAYA NINGUNA caja abierta globalmente
+      const cajaActiva = await Caja.findOne({ estado: 'abierta' });
+      if (cajaActiva) {
+        return res.status(400).json({
+          mensaje: 'Ya existe una caja abierta en el sistema.',
+          caja: cajaActiva,
+        });
+      }
     }
 
     const caja = await Caja.create({
       montoInicial: montoInicial || 0,
       observaciones,
+      nombreCaja: nombreCaja || `Caja de ${req.user.nombre}`,
       usuarioApertura: req.user._id,
     });
 
     res.status(201).json({ mensaje: 'Caja abierta correctamente', caja });
+
+    await recordAudit({
+      usuarioId: req.user._id,
+      accion: 'ABRIR_CAJA',
+      modulo: 'CAJA',
+      detalle: `Caja abierta con monto inicial: ${caja.montoInicial}`,
+      metadata: { cajaId: caja._id, montoInicial: caja.montoInicial },
+      req,
+    });
   } catch (error) {
     res.status(500).json({ mensaje: 'Error al abrir caja', error: error.message });
   }
@@ -176,6 +208,15 @@ const cerrarCaja = async (req, res) => {
 
     const cajaGuardada = await caja.save();
 
+    await recordAudit({
+      usuarioId: req.user._id,
+      accion: 'CERRAR_CAJA',
+      modulo: 'CAJA',
+      detalle: `Caja cerrada con monto final: ${montoFisicoConsolidado}. Diferencia: ${caja.diferencia}`,
+      metadata: { cajaId: caja._id, diferencia: caja.diferencia },
+      req,
+    });
+
     console.log('--- CIERRE REALIZADO ---');
     console.log('Monto Fisico Final:', montoFisicoConsolidado);
     console.log('Billetaje en BD:', cajaGuardada.billetaje.length);
@@ -204,7 +245,18 @@ const cerrarCaja = async (req, res) => {
 // @GET /api/caja/actual
 const getCajaActual = async (req, res) => {
   try {
-    const caja = await Caja.findOne({ estado: 'abierta' })
+    let config = await Config.findOne();
+    if (!config) config = await Config.create({});
+
+    const query = { estado: 'abierta' };
+    
+    // Si es ONLINE, el usuario busca SU caja abierta.
+    // Si es DESKTOP, busca la única caja abierta que haya.
+    if (config.tipoSistema === 'online') {
+      query.usuarioApertura = req.user._id;
+    }
+
+    const caja = await Caja.findOne(query)
       .populate('usuarioApertura', 'nombre')
       .sort({ fechaApertura: -1 });
 
@@ -251,7 +303,13 @@ const registrarEgreso = async (req, res) => {
   try {
     const { concepto, monto } = req.body;
 
-    const caja = await Caja.findOne({ estado: 'abierta' });
+    let config = await Config.findOne();
+    const query = { estado: 'abierta' };
+    if (config?.tipoSistema === 'online') {
+      query.usuarioApertura = req.user._id;
+    }
+
+    const caja = await Caja.findOne(query);
     if (!caja) return res.status(404).json({ mensaje: 'No hay caja abierta' });
 
     caja.egresos.push({ concepto, monto, tipo: 'egreso' });

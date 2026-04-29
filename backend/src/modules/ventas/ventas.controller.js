@@ -4,6 +4,7 @@ const Caja = require('../caja/caja.model');
 const Cliente = require('../clientes/cliente.model');
 const Credito = require('../creditos/credito.model');
 const mongoose = require('mongoose');
+const { recordAudit } = require('../audit/audit.controller');
 
 const isControlaStock = (producto) => producto?.controlaStock !== false;
 
@@ -145,13 +146,14 @@ const getVentaById = async (req, res) => {
   }
 };
 
+const Config = require('../config/config.model');
+
 // @POST /api/ventas
 const createVenta = async (req, res) => {
   try {
     const {
       cliente,
       productos,
-      // Backward compatible: descuento numérico como descuento general en monto
       descuento = 0,
       descuentoGeneralTipo,
       descuentoGeneralValor,
@@ -164,7 +166,6 @@ const createVenta = async (req, res) => {
       return res.status(400).json({ mensaje: 'La venta debe tener al menos un producto' });
     }
 
-    // Permiso de descuentos: Admin siempre puede; Cajero solo si está habilitado por el Admin.
     const rol = String(req.user?.rol || '');
     const canApplyDiscount = rol === 'admin' || (rol === 'cajero' && req.user?.puedeAplicarDescuento === true);
     if (!canApplyDiscount) {
@@ -183,10 +184,18 @@ const createVenta = async (req, res) => {
       }
     }
 
-    // 0. Caja debe estar abierta para cualquier venta/pedido
-    const cajaActiva = await Caja.findOne({ estado: 'abierta' });
+    // 0. Caja: Consultar modo y buscar caja abierta correcta
+    let config = await Config.findOne();
+    if (!config) config = await Config.create({});
+
+    const queryCaja = { estado: 'abierta' };
+    if (config.tipoSistema === 'online') {
+      queryCaja.usuarioApertura = req.user._id;
+    }
+
+    const cajaActiva = await Caja.findOne(queryCaja);
     if (!cajaActiva) {
-      return res.status(400).json({ mensaje: 'Debe abrir caja antes de realizar ventas/pedidos' });
+      throw new Error('Debe abrir caja antes de realizar ventas/pedidos');
     }
 
     // 1. Validaciones de Crédito
@@ -194,10 +203,10 @@ const createVenta = async (req, res) => {
     let clienteDoc = null;
 
     if (metodoPago === 'credito') {
-      if (!clienteId) return res.status(400).json({ mensaje: 'Debe seleccionar un cliente para ventas al crédito' });
+      if (!clienteId) throw new Error('Debe seleccionar un cliente para ventas al crédito');
       clienteDoc = await Cliente.findById(clienteId);
-      if (!clienteDoc) return res.status(404).json({ mensaje: 'Cliente no encontrado' });
-      if (!clienteDoc.estado) return res.status(400).json({ mensaje: 'El cliente está desactivado' });
+      if (!clienteDoc) throw new Error('Cliente no encontrado');
+      if (!clienteDoc.estado) throw new Error('El cliente está desactivado');
       infoCliente = { nombre: clienteDoc.nombre, nit: clienteDoc.nit };
     }
 
@@ -246,19 +255,28 @@ const createVenta = async (req, res) => {
         subtotal: itemSubtotal,
       });
 
-      // 3. Descontar stock y registrar en kardex (solo si controla stock)
+      // 3. Descontar stock atómicamente y registrar en kardex
       if (isControlaStock(producto)) {
         const stockAnterior = producto.stock;
-        producto.stock -= item.cantidad;
-        await producto.save();
+        
+        // Actualización atómica (Funciona en standalone MongoDB)
+        const updatedProd = await Producto.findOneAndUpdate(
+          { _id: producto._id, stock: { $gte: item.cantidad } },
+          { $inc: { stock: -item.cantidad } },
+          { new: true }
+        );
+
+        if (!updatedProd) {
+          throw new Error(`No se pudo actualizar stock de "${producto.nombre}". Stock insuficiente.`);
+        }
 
         await Kardex.create({
           productoId: item.productoId,
           tipo: 'salida',
           cantidad: item.cantidad,
           stockAnterior,
-          stockNuevo: producto.stock,
-          motivo: 'Venta', // Se actualizará abajo
+          stockNuevo: updatedProd.stock,
+          motivo: `Venta (procesando)`,
           usuarioId: req.user._id,
         });
       }
@@ -268,7 +286,6 @@ const createVenta = async (req, res) => {
     descuentoLineas = round2(descuentoLineas);
     const baseGeneral = Math.max(0, subtotalBruto - descuentoLineas);
 
-    // Descuento general: preferir {descuentoGeneralTipo/Valor}. Si no viene, usar "descuento" como monto.
     const generalTipo = descuentoGeneralTipo ? String(descuentoGeneralTipo) : (Number(descuento) > 0 ? 'monto' : 'ninguno');
     const generalValor = descuentoGeneralTipo ? descuentoGeneralValor : descuento;
     const descGeneral = safeDiscount({ baseAmount: baseGeneral, tipo: generalTipo, valor: generalValor });
@@ -276,7 +293,7 @@ const createVenta = async (req, res) => {
     const descuentoTotal = round2(descuentoLineas + descGeneral.monto);
     const total = round2(subtotalBruto - descuentoTotal);
     
-    // 4. Validar límite de crédito if applica
+    // 4. Validar límite de crédito
     if (metodoPago === 'credito') {
       const clienteObjId = new mongoose.Types.ObjectId(clienteId);
 
@@ -334,9 +351,9 @@ const createVenta = async (req, res) => {
       });
     }
 
-    // 8. Actualizar motivo en kardex (puede no existir para productos sin control de stock)
+    // 8. Actualizar motivo en kardex
     await Kardex.updateMany(
-      { motivo: 'Venta', createdAt: { $gte: venta.createdAt } },
+      { motivo: 'Venta (procesando)', usuarioId: req.user._id, createdAt: { $gte: venta.createdAt } },
       { motivo: `Venta ${venta.numeroVenta}` }
     );
 
@@ -349,7 +366,6 @@ const createVenta = async (req, res) => {
         ventaId: venta._id,
       });
     } else {
-      // Pedido/venta al crédito: visible en movimientos, pero no suma a efectivo (cálculos de caja lo excluyen)
       cajaActiva.ingresos.push({
         concepto: `Pedido (Crédito) ${venta.numeroVenta}`,
         monto: total,
@@ -359,6 +375,15 @@ const createVenta = async (req, res) => {
     }
 
     await cajaActiva.save();
+
+    await recordAudit({
+      usuarioId: req.user._id,
+      accion: 'CREATE',
+      modulo: 'VENTAS',
+      detalle: `Venta creada: ${venta.numeroVenta} por ${total}`,
+      metadata: { ventaId: venta._id, total },
+      req,
+    });
 
     res.status(201).json(venta);
   } catch (error) {
@@ -455,11 +480,19 @@ const anularVenta = async (req, res) => {
       const removed = before - (caja.ingresos || []).length;
       await caja.save();
 
-      // Si por algún motivo no existía el movimiento, no bloqueamos la anulación.
       if (removed === 0) {
         console.warn(`[anularVenta] No se encontró movimiento de caja para la venta ${venta._id} (${venta.numeroVenta})`);
       }
     }
+
+    await recordAudit({
+      usuarioId: req.user._id,
+      accion: 'ANULAR',
+      modulo: 'VENTAS',
+      detalle: `Venta anulada: ${venta.numeroVenta}`,
+      metadata: { ventaId: venta._id, motivo },
+      req,
+    });
 
     res.json({ mensaje: 'Venta anulada correctamente', venta });
   } catch (error) {

@@ -1,5 +1,6 @@
 const { Producto, Kardex } = require('./producto.model');
 const ExcelJS = require('exceljs');
+const { recordAudit } = require('../audit/audit.controller');
 
 const isControlaStock = (producto) => producto?.controlaStock !== false;
 
@@ -62,6 +63,20 @@ const getProductoById = async (req, res) => {
 const createProducto = async (req, res) => {
   try {
     const payload = { ...req.body };
+    
+    // Si viene una imagen, guardar el nombre del archivo
+    if (req.file) {
+      payload.imagen = req.file.filename;
+    }
+
+    // Normalizar tipos numéricos (FormData los envía como string)
+    if (payload.precioCompra) payload.precioCompra = Number(payload.precioCompra);
+    if (payload.precioVenta) payload.precioVenta = Number(payload.precioVenta);
+    if (payload.stock) payload.stock = Number(payload.stock);
+    if (payload.stockMinimo) payload.stockMinimo = Number(payload.stockMinimo);
+    if (payload.controlaStock === 'false') payload.controlaStock = false;
+    if (payload.controlaStock === 'true') payload.controlaStock = true;
+
     if (payload.controlaStock === false) {
       payload.stock = 0;
       payload.stockMinimo = 0;
@@ -83,6 +98,15 @@ const createProducto = async (req, res) => {
     }
 
     res.status(201).json(producto);
+
+    await recordAudit({
+      usuarioId: req.user._id,
+      accion: 'CREATE',
+      modulo: 'INVENTARIO',
+      detalle: `Producto creado: ${producto.nombre}`,
+      metadata: { productoId: producto._id, codigo: producto.codigo },
+      req,
+    });
   } catch (error) {
     res.status(500).json({ mensaje: 'Error al crear producto', error: error.message });
   }
@@ -95,8 +119,21 @@ const updateProducto = async (req, res) => {
     if (!producto) return res.status(404).json({ mensaje: 'Producto no encontrado' });
 
     const stockAnterior = producto.stock;
-
     const incoming = { ...req.body };
+
+    // Si viene una nueva imagen, actualizarla
+    if (req.file) {
+      incoming.imagen = req.file.filename;
+    }
+
+    // Normalizar tipos numéricos
+    if (incoming.precioCompra) incoming.precioCompra = Number(incoming.precioCompra);
+    if (incoming.precioVenta) incoming.precioVenta = Number(incoming.precioVenta);
+    if (incoming.stock) incoming.stock = Number(incoming.stock);
+    if (incoming.stockMinimo) incoming.stockMinimo = Number(incoming.stockMinimo);
+    if (incoming.controlaStock === 'false') incoming.controlaStock = false;
+    if (incoming.controlaStock === 'true') incoming.controlaStock = true;
+
     if (incoming.controlaStock === false) {
       incoming.stock = 0;
       incoming.stockMinimo = 0;
@@ -106,7 +143,7 @@ const updateProducto = async (req, res) => {
     await producto.save();
 
     // Si cambió el stock, registrar en kardex
-    if (isControlaStock(producto) && req.body.stock !== undefined && req.body.stock !== stockAnterior) {
+    if (isControlaStock(producto) && incoming.stock !== undefined && incoming.stock !== stockAnterior) {
       const diferencia = producto.stock - stockAnterior;
       await Kardex.create({
         productoId: producto._id,
@@ -114,12 +151,21 @@ const updateProducto = async (req, res) => {
         cantidad: Math.abs(diferencia),
         stockAnterior,
         stockNuevo: producto.stock,
-        motivo: req.body.motivoAjuste || 'Ajuste manual',
+        motivo: incoming.motivoAjuste || 'Ajuste manual',
         usuarioId: req.user._id,
       });
     }
 
     res.json({ mensaje: 'Producto actualizado', producto });
+
+    await recordAudit({
+      usuarioId: req.user._id,
+      accion: 'UPDATE',
+      modulo: 'INVENTARIO',
+      detalle: `Producto actualizado: ${producto.nombre}`,
+      metadata: { productoId: producto._id, cambios: req.body },
+      req,
+    });
   } catch (error) {
     res.status(500).json({ mensaje: 'Error al actualizar producto', error: error.message });
   }
@@ -135,6 +181,15 @@ const deleteProducto = async (req, res) => {
     await producto.save();
 
     res.json({ mensaje: 'Producto desactivado correctamente' });
+
+    await recordAudit({
+      usuarioId: req.user._id,
+      accion: 'DELETE',
+      modulo: 'INVENTARIO',
+      detalle: `Producto desactivado: ${producto.nombre}`,
+      metadata: { productoId: producto._id },
+      req,
+    });
   } catch (error) {
     res.status(500).json({ mensaje: 'Error al eliminar producto', error: error.message });
   }

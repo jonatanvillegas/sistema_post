@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('./auth.model');
+const { recordAudit } = require('../audit/audit.controller');
 
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -29,6 +30,14 @@ const login = async (req, res) => {
     if (!match) {
       return res.status(401).json({ mensaje: 'Credenciales inválidas' });
     }
+
+    await recordAudit({
+      usuarioId: user._id,
+      accion: 'LOGIN',
+      modulo: 'AUTH',
+      detalle: `Inicio de sesión exitoso: ${user.nombre} (${user.rol})`,
+      req,
+    });
 
     res.json({
       token: generateToken(user._id),
@@ -63,6 +72,15 @@ const register = async (req, res) => {
     const nextRol = rol || 'cajero';
     const flag = nextRol === 'cajero' ? Boolean(puedeAplicarDescuento) : true;
     const user = await User.create({ nombre, email, password, rol: nextRol, puedeAplicarDescuento: flag });
+
+    await recordAudit({
+      usuarioId: req.user._id,
+      accion: 'CREATE',
+      modulo: 'AUTH',
+      detalle: `Usuario creado: ${user.nombre} con rol ${user.rol}`,
+      metadata: { userId: user._id, email: user.email },
+      req,
+    });
 
     res.status(201).json({
       mensaje: 'Usuario creado correctamente',
@@ -132,6 +150,15 @@ const updateUsuario = async (req, res) => {
 
     await user.save();
 
+    await recordAudit({
+      usuarioId: req.user._id,
+      accion: 'UPDATE',
+      modulo: 'AUTH',
+      detalle: `Usuario actualizado: ${user.nombre}`,
+      metadata: { userId: user._id, cambios: req.body },
+      req,
+    });
+
     res.json({
       mensaje: 'Usuario actualizado',
       usuario: {
@@ -154,7 +181,19 @@ const deleteUsuario = async (req, res) => {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ mensaje: 'Usuario no encontrado' });
 
+    const userId = user._id;
+    const userNombre = user.nombre;
     await user.deleteOne();
+
+    await recordAudit({
+      usuarioId: req.user._id,
+      accion: 'DELETE',
+      modulo: 'AUTH',
+      detalle: `Usuario eliminado: ${userNombre}`,
+      metadata: { userId },
+      req,
+    });
+
     res.json({ mensaje: 'Usuario eliminado' });
   } catch (error) {
     res.status(500).json({ mensaje: 'Error al eliminar usuario', error: error.message });
