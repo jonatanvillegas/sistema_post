@@ -4,15 +4,11 @@ const toCents = (value) => Math.round((Number(value) || 0) * 100);
 const fromCents = (cents) => Number((Number(cents || 0) / 100).toFixed(2));
 
 const toStartOfDay = (d) => {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
+  return new Date(`${d}T00:00:00`);
 };
 
 const toEndOfDay = (d) => {
-  const x = new Date(d);
-  x.setHours(23, 59, 59, 999);
-  return x;
+  return new Date(`${d}T23:59:59.999`);
 };
 
 const isValidDate = (d) => d instanceof Date && !Number.isNaN(d.getTime());
@@ -27,7 +23,18 @@ const escapeCsv = (value) => {
 const formatIso = (d) => {
   try {
     const x = new Date(d);
-    return isValidDate(x) ? x.toISOString() : '';
+    if (!isValidDate(x)) return '';
+    
+    // Formato local legible para Excel/CSV: YYYY-MM-DD HH:mm:ss
+    const pad = (n) => String(n).padStart(2, '0');
+    const yyyy = x.getFullYear();
+    const mm = pad(x.getMonth() + 1);
+    const dd = pad(x.getDate());
+    const hh = pad(x.getHours());
+    const min = pad(x.getMinutes());
+    const ss = pad(x.getSeconds());
+    
+    return `${yyyy}-${mm}-${dd} ${hh}:${min}:${ss}`;
   } catch {
     return '';
   }
@@ -264,12 +271,8 @@ const getHistorialCaja = async (req, res) => {
 
     if (desde || hasta) {
       filtro.fechaApertura = {};
-      if (desde) filtro.fechaApertura.$gte = new Date(desde);
-      if (hasta) {
-        const fechaHasta = new Date(hasta);
-        fechaHasta.setHours(23, 59, 59, 999);
-        filtro.fechaApertura.$lte = fechaHasta;
-      }
+      if (desde) filtro.fechaApertura.$gte = new Date(`${desde}T00:00:00`);
+      if (hasta) filtro.fechaApertura.$lte = new Date(`${hasta}T23:59:59.999`);
     }
 
     const total = await Caja.countDocuments(filtro);
@@ -304,26 +307,32 @@ const getCajaById = async (req, res) => {
 // Exporta en CSV todos los movimientos (ingresos/egresos) dentro del rango.
 const exportTransaccionesCaja = async (req, res) => {
   try {
-    const { desde, hasta } = req.query;
+    const { desde, hasta, cajaId } = req.query;
 
-    if (!desde || !hasta) {
-      return res.status(400).json({ mensaje: 'Debe enviar desde y hasta (YYYY-MM-DD)' });
+    const filtro = {};
+    if (cajaId) {
+      filtro._id = cajaId;
+    } else {
+      if (!desde || !hasta) {
+        return res.status(400).json({ mensaje: 'Debe enviar desde y hasta (YYYY-MM-DD) o un cajaId' });
+      }
+      const start = toStartOfDay(desde);
+      const end = toEndOfDay(hasta);
+
+      if (!isValidDate(start) || !isValidDate(end) || start > end) {
+        return res.status(400).json({ mensaje: 'Rango de fechas inválido' });
+      }
+
+      filtro.fechaApertura = { $lte: end };
+      filtro.$or = [{ fechaCierre: null }, { fechaCierre: { $gte: start } }];
     }
 
-    const start = toStartOfDay(new Date(desde));
-    const end = toEndOfDay(new Date(hasta));
-
-    if (!isValidDate(start) || !isValidDate(end) || start > end) {
-      return res.status(400).json({ mensaje: 'Rango de fechas inválido' });
-    }
-
-    // Traemos cajas que se solapan con el rango (para no cargar histórico completo)
-    const cajas = await Caja.find({
-      fechaApertura: { $lte: end },
-      $or: [{ fechaCierre: null }, { fechaCierre: { $gte: start } }],
-    })
+    const cajas = await Caja.find(filtro)
       .populate('usuarioApertura', 'nombre')
       .lean();
+
+    const start = desde ? toStartOfDay(desde) : null;
+    const end = hasta ? toEndOfDay(hasta) : null;
 
     const rows = [];
     for (const caja of cajas) {
@@ -335,7 +344,7 @@ const exportTransaccionesCaja = async (req, res) => {
       for (const mov of caja?.ingresos || []) {
         const fechaMov = mov?.createdAt || mov?.fecha;
         const f = new Date(fechaMov);
-        if (!isValidDate(f) || f < start || f > end) continue;
+        if (start && end && (!isValidDate(f) || f < start || f > end)) continue;
         rows.push({
           fecha: f,
           direccion: 'INGRESO',
@@ -353,7 +362,7 @@ const exportTransaccionesCaja = async (req, res) => {
       for (const mov of caja?.egresos || []) {
         const fechaMov = mov?.createdAt || mov?.fecha;
         const f = new Date(fechaMov);
-        if (!isValidDate(f) || f < start || f > end) continue;
+        if (start && end && (!isValidDate(f) || f < start || f > end)) continue;
         rows.push({
           fecha: f,
           direccion: 'EGRESO',
@@ -402,7 +411,7 @@ const exportTransaccionesCaja = async (req, res) => {
     );
 
     const csv = [header, ...lines].join('\n');
-    const filename = `transacciones_caja_${desde}_a_${hasta}.csv`;
+    const filename = cajaId ? `movimientos_caja_${cajaId}.csv` : `transacciones_caja_${desde}_a_${hasta}.csv`;
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

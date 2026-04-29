@@ -53,8 +53,8 @@ const getVentas = async (req, res) => {
     }
     if (desde || hasta) {
       filtro.fecha = {};
-      if (desde) filtro.fecha.$gte = new Date(desde);
-      if (hasta) filtro.fecha.$lte = new Date(hasta);
+      if (desde) filtro.fecha.$gte = new Date(`${desde}T00:00:00`);
+      if (hasta) filtro.fecha.$lte = new Date(`${hasta}T23:59:59.999`);
     }
 
     const total = await Venta.countDocuments(filtro);
@@ -78,13 +78,11 @@ const getVentasReporteAdmin = async (req, res) => {
       return res.status(400).json({ mensaje: 'Debe enviar desde y hasta (YYYY-MM-DD)' });
     }
 
-    const d0 = new Date(String(desde));
-    const d1 = new Date(String(hasta));
+    const d0 = new Date(`${desde}T00:00:00`);
+    const d1 = new Date(`${hasta}T23:59:59.999`);
     if (Number.isNaN(d0.getTime()) || Number.isNaN(d1.getTime())) {
       return res.status(400).json({ mensaje: 'Rango de fecha inválido' });
     }
-    d0.setHours(0, 0, 0, 0);
-    d1.setHours(23, 59, 59, 999);
 
     const match = {
       estado: 'completada',

@@ -105,23 +105,28 @@ export default function CajaPage() {
     }
   };
 
-  const descargarReporteTransacciones = async () => {
-    const desde = filtrosHistorial.desde ? filtrosHistorial.desde.format('YYYY-MM-DD') : null;
-    const hasta = filtrosHistorial.hasta ? filtrosHistorial.hasta.format('YYYY-MM-DD') : null;
+  const descargarReporteTransacciones = async (cajaId = null) => {
+    let desde = null;
+    let hasta = null;
+    
+    if (!cajaId) {
+      desde = filtrosHistorial.desde ? filtrosHistorial.desde.format('YYYY-MM-DD') : null;
+      hasta = filtrosHistorial.hasta ? filtrosHistorial.hasta.format('YYYY-MM-DD') : null;
 
-    if (!desde || !hasta) {
-      toast.error('Seleccione un rango de fechas para el reporte');
-      return;
+      if (!desde || !hasta) {
+        toast.error('Seleccione un rango de fechas para el reporte');
+        return;
+      }
     }
 
     setLoadingReporte(true);
     try {
-      const res = await exportTransaccionesCaja({ desde, hasta });
+      const res = await exportTransaccionesCaja({ desde, hasta, cajaId });
       const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `transacciones_caja_${desde}_a_${hasta}.csv`;
+      a.download = cajaId ? `movimientos_caja_${cajaId}.csv` : `transacciones_caja_${desde}_a_${hasta}.csv`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -204,13 +209,22 @@ export default function CajaPage() {
       title: 'Acciones',
       align: 'right',
       render: (_, record) => record.fechaCierre && (
-        <Button 
-          icon={<EyeOutlined />} 
-          size="small" 
-          onClick={() => { setSelectedCajaHistorial(record); setIsModalDetalleVisible(true); }}
-        >
-          Detalle
-        </Button>
+        <Space>
+          <Button 
+            icon={<EyeOutlined />} 
+            size="small" 
+            onClick={() => { setSelectedCajaHistorial(record); setIsModalDetalleVisible(true); }}
+          >
+            Detalle
+          </Button>
+          <Button 
+            icon={<RiseOutlined />} 
+            size="small" 
+            onClick={() => descargarReporteTransacciones(record._id)}
+          >
+            Movs.
+          </Button>
+        </Space>
       )
     }
   ];
@@ -326,8 +340,21 @@ export default function CajaPage() {
         title={<span><EyeOutlined /> Detalle de Jornada: {selectedCajaHistorial && formatDateTime(selectedCajaHistorial.fechaApertura)}</span>}
         open={isModalDetalleVisible}
         onCancel={() => setIsModalDetalleVisible(false)}
-        footer={null}
-        width={650}
+        footer={[
+          <Button key="close" onClick={() => setIsModalDetalleVisible(false)}>
+            Cerrar
+          </Button>,
+          <Button 
+            key="download" 
+            type="primary" 
+            icon={<RiseOutlined />} 
+            onClick={() => descargarReporteTransacciones(selectedCajaHistorial?._id)}
+            loading={loadingReporte}
+          >
+            Descargar Movimientos (CSV)
+          </Button>
+        ]}
+        width={700}
       >
         {selectedCajaHistorial && (
             <div>

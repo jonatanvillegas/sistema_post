@@ -311,6 +311,7 @@ export default function InventarioPage() {
       form.setFieldsValue({
         ...producto,
         controlaStock: producto.controlaStock !== false,
+        margenGanancia: calcMargenFromCompraVenta(producto.precioCompra, producto.precioVenta) || 0
       });
     } else {
       form.resetFields();
