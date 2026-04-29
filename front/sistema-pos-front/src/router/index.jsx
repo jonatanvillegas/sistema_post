@@ -14,6 +14,8 @@ import ClientesPage from '../pages/Clientes/ClientesPage';
 import AjustesPage from '../pages/Usuarios/AjustesPage';
 import CategoriasPage from '../pages/Categorias/CategoriasPage';
 import VentasReportePage from '../pages/Admin/VentasReportePage';
+import AuditPage from '../pages/Admin/AuditPage';
+import ProductoFormPage from '../pages/Inventario/ProductoFormPage';
 import { useAuthStore } from '../store/authStore';
 
 const HomeRedirect = () => {
@@ -46,6 +48,8 @@ export default function AppRouter() {
             {/* Encargado de Inventario */}
             <Route element={<PrivateRoute allowedRoles={["admin", "inventario"]} />}>
               <Route path="/inventario" element={<InventarioPage />} />
+              <Route path="/inventario/nuevo" element={<ProductoFormPage />} />
+              <Route path="/inventario/editar/:id" element={<ProductoFormPage />} />
               <Route path="/proveedores" element={<ProveedoresPage />} />
             </Route>
 
@@ -55,6 +59,7 @@ export default function AppRouter() {
               <Route path="/ajustes" element={<AjustesPage />} />
               <Route path="/categorias" element={<CategoriasPage />} />
               <Route path="/ventas-reporte" element={<VentasReportePage />} />
+              <Route path="/auditoria" element={<AuditPage />} />
             </Route>
 
             <Route path="/" element={<HomeRedirect />} />

@@ -9,8 +9,8 @@ import {
   DesktopOutlined,
   PrinterOutlined
 } from '@ant-design/icons';
-import { crearBackup } from '../../api/admin.api';
-import { previewRestore, restoreFromFolder } from '../../api/admin.api';
+import { getConfig, updateConfig } from '../../api/config.api';
+import { crearBackup, previewRestore, restoreFromFolder } from '../../api/admin.api';
 import { getPrintSettings, setPrintSettings } from '../../utils/printSettings';
 
 const { Title, Text, Paragraph } = Typography;
@@ -19,14 +19,41 @@ export default function AjustesPage() {
   const [loading, setLoading] = useState(false);
   const [lastBackup, setLastBackup] = useState(null);
   const [formPrint] = Form.useForm();
+  const [formConfig] = Form.useForm();
 
   const [restoreFolder, setRestoreFolder] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
   const [restoreLoading, setRestoreLoading] = useState(false);
   const [previewData, setPreviewData] = useState(null);
   const [confirmRestoreText, setConfirmRestoreText] = useState('');
+  const [configLoading, setConfigLoading] = useState(false);
 
   const initialPrint = getPrintSettings();
+
+  React.useEffect(() => {
+    fetchConfig();
+  }, []);
+
+  const fetchConfig = async () => {
+    try {
+      const res = await getConfig();
+      formConfig.setFieldsValue(res.data);
+    } catch (err) {
+      console.error('Error fetching config:', err);
+    }
+  };
+
+  const handleUpdateConfig = async (values) => {
+    setConfigLoading(true);
+    try {
+      await updateConfig(values);
+      message.success('Configuración del sistema actualizada');
+    } catch (err) {
+      message.error('No se pudo actualizar la configuración');
+    } finally {
+      setConfigLoading(false);
+    }
+  };
 
   const handleBackup = async () => {
     setLoading(true);
@@ -140,6 +167,59 @@ export default function AjustesPage() {
       </div>
 
       <Space direction="vertical" size="large" style={{ width: '100%' }}>
+        
+        {/* Sección de Configuración del Sistema */}
+        <Card 
+          title={<Space><DesktopOutlined style={{ color: '#6366f1' }} /> Configuración del Sistema</Space>}
+          className="dashboard-card"
+        >
+          <Form
+            form={formConfig}
+            layout="vertical"
+            onFinish={handleUpdateConfig}
+          >
+            <Row gutter={[16, 16]}>
+              <Col xs={24} md={12}>
+                <Form.Item 
+                  name="tipoSistema" 
+                  label="Tipo de Producto / Funcionamiento"
+                  extra="Desktop: Una sola caja global. Online: Múltiples cajas (una por colaborador)."
+                >
+                  <Select placeholder="Seleccione el modo">
+                    <Select.Option value="desktop">🖥️ Escritorio (Caja Única)</Select.Option>
+                    <Select.Option value="online">🌐 En Línea (Multicaja)</Select.Option>
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={12}>
+                <Form.Item 
+                  name="nombreEmpresa" 
+                  label="Nombre de la Empresa"
+                >
+                  <Input placeholder="Ej: Mi Tienda" />
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={12}>
+                <Form.Item 
+                  name="mostrarImagenesProductos" 
+                  label="Visualización de Productos"
+                  valuePropName="checked"
+                >
+                  <Switch checkedChildren="Mostrar Imágenes" unCheckedChildren="Ocultar Imágenes" />
+                </Form.Item>
+              </Col>
+              <Col xs={24}>
+                <Button 
+                  type="primary" 
+                  htmlType="submit" 
+                  loading={configLoading}
+                >
+                  Guardar Cambios del Sistema
+                </Button>
+              </Col>
+            </Row>
+          </Form>
+        </Card>
         
         {/* Sección de Backups */}
         <Card 

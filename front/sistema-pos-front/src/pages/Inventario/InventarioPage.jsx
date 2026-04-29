@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Table, Card, Button, Input, Space, Typography, Tag, 
-  Modal, Form, InputNumber, Select, Descriptions, Divider, Popconfirm, Badge, Row, Col, Switch
+  Modal, Form, InputNumber, Select, Descriptions, Divider, Popconfirm, Badge, Row, Col, Switch, Tooltip, Avatar
 } from 'antd';
 import { 
   PlusOutlined, SearchOutlined, EditOutlined, 
   DeleteOutlined, HistoryOutlined, ExclamationCircleOutlined,
-  BarcodeOutlined
+  BarcodeOutlined, FileExcelOutlined, InboxOutlined, SyncOutlined
 } from '@ant-design/icons';
 import { toast } from 'react-hot-toast';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { 
   getProductos,
   createProducto,
@@ -20,6 +20,7 @@ import {
 } from '../../api/inventario.api';
 import { getProveedores } from '../../api/proveedores.api';
 import { getCategorias } from '../../api/categorias.api';
+import { getConfig } from '../../api/config.api';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 import StockBadge from '../../components/StockBadge';
 import { useAuthStore } from '../../store/authStore';
@@ -53,29 +54,22 @@ const generateEan13 = () => {
 };
 
 export default function InventarioPage() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState([]);
-  const [proveedores, setProveedores] = useState([]);
-  const [categorias, setCategorias] = useState([]);
   const [busqueda, setBusqueda] = useState('');
   const [stockBajoFilter, setStockBajoFilter] = useState(false);
-  const [isModalVisible, setIsModalVisible] = useState(false);
   const [isKardexVisible, setIsKardexVisible] = useState(false);
   const [kardexData, setKardexData] = useState([]);
   const [editingProducto, setEditingProducto] = useState(null);
-  const [form] = Form.useForm();
+  const [config, setConfig] = useState(null);
   const { isAdmin, hasAnyRole } = useAuthStore();
   const canManage = hasAnyRole(['admin', 'inventario']);
   const [exporting, setExporting] = useState(false);
 
   const [searchParams] = useSearchParams();
-
-  const isAutoUpdatingRef = useRef(false);
-  const barcodeCanvasRef = useRef(null);
-  const codigoValue = Form.useWatch('codigo', form);
-  const categoriaValue = Form.useWatch('categoria', form);
-  const [barcodeError, setBarcodeError] = useState('');
-  const [barcodeAssistEnabled, setBarcodeAssistEnabled] = useState(false);
+  const lastKeyTime = useRef(Date.now());
+  const [isScanning, setIsScanning] = useState(false);
 
   useEffect(() => {
     const qStockBajo = searchParams.get('stockBajo') === 'true';
@@ -84,108 +78,28 @@ export default function InventarioPage() {
     if (qBuscar !== null) setBusqueda(qBuscar);
   }, [searchParams]);
 
-  const round2 = (n) => Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100;
-
-  const getBarcodeFormat = (raw) => {
-    const s = String(raw || '').trim();
-    if (!s) return null;
-    const digitsOnly = /^\d+$/.test(s);
-    if (digitsOnly && (s.length === 12 || s.length === 13)) return 'EAN13';
-    return 'CODE128';
-  };
-
-  const downloadBarcodePng = () => {
-    const canvas = barcodeCanvasRef.current;
-    const code = String(form.getFieldValue('codigo') || '').trim();
-    if (!canvas || !code) return;
-
-    try {
-      const dataUrl = canvas.toDataURL('image/png');
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = `barcode_${code}.png`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    } catch {
-      toast.error('No se pudo descargar el código de barras');
-    }
-  };
-
   useEffect(() => {
-    if (!isModalVisible) return;
-    if (!barcodeAssistEnabled) {
-      const canvas = barcodeCanvasRef.current;
-      const ctx = canvas?.getContext?.('2d');
-      if (ctx && canvas) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-      }
-      setBarcodeError('');
-      return;
-    }
-    const canvas = barcodeCanvasRef.current;
-    const code = String(codigoValue || '').trim();
-    if (!canvas) return;
+    fetchData();
+    fetchConfig();
+  }, [busqueda, stockBajoFilter]);
 
-    // Limpiar canvas si no hay código
-    const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-    }
-    setBarcodeError('');
-    if (!code) return;
-
-    const format = getBarcodeFormat(code);
-    if (!format) return;
-
+  const fetchConfig = async () => {
     try {
-      JsBarcode(canvas, code, {
-        format,
-        displayValue: true,
-        margin: 8,
-        height: 60,
-        fontSize: 14,
-      });
-    } catch {
-      setBarcodeError('Código inválido para generar imagen');
+      const res = await getConfig();
+      setConfig(res.data);
+    } catch (err) {
+      console.error('Error fetching config:', err);
     }
-  }, [isModalVisible, barcodeAssistEnabled, codigoValue]);
-
-  // Fórmula única (margen como % entero):
-  // precioVenta = precioCompra / (1 - (margenPct/100))
-  const calcPrecioVentaFromCompraMargen = (precioCompra, margenPct) => {
-    const pc = Number(precioCompra);
-    const mPct = Number(margenPct);
-    if (!isFinite(pc) || !isFinite(mPct)) return null;
-    if (pc < 0) return null;
-    if (mPct < 0 || mPct >= 100) return null;
-    const m = mPct / 100;
-    const pv = pc / (1 - m);
-    if (!isFinite(pv) || pv < 0) return null;
-    return round2(pv);
-  };
-
-  const calcMargenFromCompraVenta = (precioCompra, precioVenta) => {
-    const pc = Number(precioCompra);
-    const pv = Number(precioVenta);
-    if (!isFinite(pc) || !isFinite(pv)) return null;
-    if (pv <= 0) return null;
-    // margen sobre precio de venta (utilidad bruta)
-    const mPct = ((pv - pc) / pv) * 100;
-    if (!isFinite(mPct)) return null;
-    // Margen debe ser entero
-    return Math.round(mPct);
   };
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [resProd, resProv] = await Promise.all([
-        getProductos({ buscar: busqueda, stockBajo: stockBajoFilter ? 'true' : undefined }),
-        getProveedores()
-      ]);
+      const resProd = await getProductos({ 
+        buscar: busqueda, 
+        stockBajo: stockBajoFilter ? 'true' : undefined 
+      });
       setData(resProd.data);
-      setProveedores(resProv.data);
     } catch {
       toast.error('Error al cargar datos del inventario');
     } finally {
@@ -224,26 +138,10 @@ export default function InventarioPage() {
     }
   };
 
-  const fetchCategorias = async () => {
-    try {
-      const res = await getCategorias();
-      setCategorias(Array.isArray(res.data) ? res.data : []);
-    } catch {
-      // No bloquear inventario si falla categorías
-      setCategorias([]);
-    }
-  };
-
-  // Estado para el scanner global
-  const [isScanning, setIsScanning] = useState(false);
-  const lastKeyTime = useRef(Date.now());
-
   useEffect(() => {
     const handleKeyDown = (e) => {
-      // 1. Ignorar si estamos en campos de texto que NO sean el de búsqueda o el de código
       const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName);
       const isSearchInput = e.target.id === 'inventario-search';
-      const isCodeInput = e.target.id === 'codigo' || e.target.id === 'form_item_codigo';
 
       if (e.key === 'F10') {
         e.preventDefault();
@@ -251,36 +149,21 @@ export default function InventarioPage() {
         return;
       }
 
-      // 2. Lógica de Scanner Global
-      // Si no hay otros inputs enfocados (o si es el de búsqueda o el del modal)
-      if (!isInput || isSearchInput || isCodeInput) {
+      if (!isInput || isSearchInput) {
         const currentTime = Date.now();
         const diff = currentTime - lastKeyTime.current;
         lastKeyTime.current = currentTime;
 
-        // Si es una tecla alfanumérica y no tiene modificadores
         if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
-          
-          if (isModalVisible) {
-             // Si el modal está abierto, redirigir al campo 'codigo' del formulario
-             if (!isCodeInput) {
-               e.preventDefault();
-               const currentCodigo = form.getFieldValue('codigo') || '';
-               form.setFieldsValue({ codigo: currentCodigo + e.key });
-             }
-          } else {
-             // Si el modal está cerrado, redirigir al buscador general
-             if (!isSearchInput) {
-               e.preventDefault();
-               const searchEl = document.getElementById('inventario-search');
-               if (searchEl) {
-                 searchEl.focus();
-                 setBusqueda(prev => prev + e.key);
-               }
-             }
+          if (!isSearchInput) {
+            e.preventDefault();
+            const searchEl = document.getElementById('inventario-search');
+            if (searchEl) {
+              searchEl.focus();
+              setBusqueda(prev => prev + e.key);
+            }
           }
 
-          // Indicador visual de escaneo rápido
           if (diff < 50) {
             setIsScanning(true);
             clearTimeout(window.scanTimeoutInv);
@@ -294,94 +177,7 @@ export default function InventarioPage() {
       window.removeEventListener('keydown', handleKeyDown);
       clearTimeout(window.scanTimeoutInv);
     };
-  }, [isModalVisible, busqueda]);
-
-  useEffect(() => {
-    fetchCategorias();
-  }, []);
-
-  useEffect(() => {
-    fetchData();
-  }, [busqueda, stockBajoFilter]);
-
-  const handleOpenModal = (producto = null) => {
-    setEditingProducto(producto);
-    setBarcodeAssistEnabled(false);
-    if (producto) {
-      form.setFieldsValue({
-        ...producto,
-        controlaStock: producto.controlaStock !== false,
-        margenGanancia: calcMargenFromCompraVenta(producto.precioCompra, producto.precioVenta) || 0
-      });
-    } else {
-      form.resetFields();
-      // Si hay algo en la búsqueda que parece código, pre-llenarlo
-      const looksLikeCode = busqueda && busqueda.length > 3 && !isNaN(busqueda);
-      form.setFieldsValue({ 
-        stock: 0, 
-        stockMinimo: 5, 
-        precioCompra: 0, 
-        precioVenta: 0,
-        controlaStock: true,
-        codigo: looksLikeCode ? busqueda : ''
-      });
-    }
-    setIsModalVisible(true);
-  };
-
-  const handleFormValuesChange = (changedValues, allValues) => {
-    if (isAutoUpdatingRef.current) return;
-
-    const changedKeys = Object.keys(changedValues || {});
-    const changedKey = changedKeys[0];
-    if (!changedKey) return;
-    if (!['precioCompra', 'precioVenta', 'margenGanancia'].includes(changedKey)) return;
-
-    const { precioCompra, precioVenta, margenGanancia } = allValues;
-    const pc = Number(precioCompra);
-    const pv = Number(precioVenta);
-    const m = Number(margenGanancia);
-
-    const next = {};
-
-    // Reglas:
-    // - Si cambia compra o margen => recalcular precio de venta
-    // - Si cambia precio de venta => recalcular margen (sin tocar compra)
-    if (changedKey === 'precioVenta') {
-      if (isFinite(pc) && pc >= 0 && isFinite(pv) && pv > 0) {
-        const nextM = calcMargenFromCompraVenta(pc, pv);
-        if (nextM !== null && isFinite(nextM)) next.margenGanancia = nextM;
-      }
-    } else {
-      if (isFinite(pc) && pc >= 0 && isFinite(m)) {
-        const nextPv = calcPrecioVentaFromCompraMargen(pc, m);
-        if (nextPv !== null && isFinite(nextPv) && nextPv >= 0) next.precioVenta = nextPv;
-      }
-    }
-
-    if (Object.keys(next).length === 0) return;
-    isAutoUpdatingRef.current = true;
-    form.setFieldsValue(next);
-    isAutoUpdatingRef.current = false;
-  };
-
-  const onFinish = async (values) => {
-    try {
-      const payload = { ...values };
-      delete payload.margenGanancia;
-      if (editingProducto) {
-        await updateProducto(editingProducto._id, payload);
-        toast.success('Producto actualizado');
-      } else {
-        await createProducto(payload);
-        toast.success('Producto creado');
-      }
-      setIsModalVisible(false);
-      fetchData();
-    } catch (err) {
-      toast.error(err.response?.data?.mensaje || 'Error al guardar producto');
-    }
-  };
+  }, [busqueda]);
 
   const handleDelete = async (id) => {
     try {
@@ -406,11 +202,31 @@ export default function InventarioPage() {
 
   const columns = [
     {
+      title: 'Img',
+      key: 'imagen',
+      width: 70,
+      hidden: !config?.mostrarImagenesProductos,
+      render: (_, record) => {
+        const url = record.imagen 
+          ? `${import.meta.env.VITE_API_URL || 'http://localhost:5000'}/uploads/productos/${record.imagen}`
+          : null;
+        return (
+          <Avatar 
+            shape="square" 
+            size={48} 
+            src={url} 
+            icon={<InboxOutlined />} 
+            style={{ backgroundColor: '#f5f5f5', color: '#d9d9d9' }}
+          />
+        );
+      }
+    },
+    {
       title: 'Producto',
       dataIndex: 'nombre',
       key: 'nombre',
       render: (text, record) => (
-        <Space orientation="vertical" size={0} style={{ lineHeight: 1 }}>
+        <Space direction="vertical" size={0} style={{ lineHeight: 1.2 }}>
           <Text strong>{text}</Text>
           <Text type="secondary" style={{ fontSize: 11 }}>
             <BarcodeOutlined /> {record.codigo || 'S/C'} | {record.categoria}
@@ -419,26 +235,24 @@ export default function InventarioPage() {
       )
     },
     {
-      title: 'Precio Compra',
+      title: 'Costo',
       dataIndex: 'precioCompra',
       render: (val) => formatCurrency(val),
       responsive: ['md']
     },
     {
-      title: 'Precio Venta',
+      title: 'Venta',
       dataIndex: 'precioVenta',
       render: (val) => <Text strong style={{ color: '#1677ff' }}>{formatCurrency(val)}</Text>
     },
     {
-      title: 'Margen (%)',
+      title: 'Margen',
+      key: 'margen',
       render: (_, record) => {
         const pv = Number(record.precioVenta);
         const pc = Number(record.precioCompra);
-        if (!isFinite(pv) || pv <= 0 || !isFinite(pc)) {
-          return <Tag>—</Tag>;
-        }
+        if (!isFinite(pv) || pv <= 0 || !isFinite(pc)) return <Tag>—</Tag>;
         const margen = ((pv - pc) / pv) * 100;
-        if (!isFinite(margen)) return <Tag>—</Tag>;
         return <Tag color={margen > 30 ? 'green' : 'blue'}>{margen.toFixed(1)}%</Tag>;
       },
       responsive: ['lg']
@@ -456,10 +270,46 @@ export default function InventarioPage() {
       align: 'right',
       render: (_, record) => (
         <Space>
-           <Button icon={<HistoryOutlined />} size="small" onClick={() => showKardex(record)}>Kardex</Button>
+           <Tooltip title="Ver Código">
+             <Button 
+               icon={<BarcodeOutlined />} 
+               size="small" 
+               onClick={() => {
+                 Modal.info({
+                   title: `Código de Barras: ${record.nombre}`,
+                   content: (
+                     <div style={{ textAlign: 'center', padding: 20 }}>
+                       <canvas id={`bc-${record._id}`} style={{ maxWidth: '100%' }} />
+                       <script>
+                         {setTimeout(() => {
+                           const canvas = document.getElementById(`bc-${record._id}`);
+                           if (canvas) {
+                             JsBarcode(canvas, record.codigo || '000000', { format: 'CODE128', displayValue: true });
+                           }
+                         }, 100)}
+                       </script>
+                       <div style={{ marginTop: 10 }}>
+                         <Text copyable>{record.codigo}</Text>
+                       </div>
+                     </div>
+                   ),
+                   width: 400
+                 });
+               }} 
+             />
+           </Tooltip>
+           <Tooltip title="Kardex">
+             <Button icon={<HistoryOutlined />} size="small" onClick={() => showKardex(record)} />
+           </Tooltip>
            {canManage && (
              <>
-               <Button icon={<EditOutlined />} size="small" type="primary" ghost onClick={() => handleOpenModal(record)} />
+               <Button 
+                icon={<EditOutlined />} 
+                size="small" 
+                type="primary" 
+                ghost 
+                onClick={() => navigate(`/inventario/editar/${record._id}`)} 
+               />
                {isAdmin() && (
                  <Popconfirm title="¿Eliminar producto?" onConfirm={() => handleDelete(record._id)}>
                    <Button icon={<DeleteOutlined />} size="small" danger ghost />
@@ -470,286 +320,124 @@ export default function InventarioPage() {
         </Space>
       )
     }
-  ];
+  ].filter(col => !col.hidden);
 
   return (
-    <div>
-      <div className="page-header">
+    <div style={{ padding: '0 24px', width: '100%', maxWidth: '100%' }}>
+      <div className="page-header" style={{ marginBottom: 24 }}>
         <div>
-          <Title level={2} className="page-title">Inventario</Title>
-          <Text className="page-sub">Gestión de productos y control de stock centralizado.</Text>
+          <Title level={2} className="page-title">Inventario Maestro</Title>
+          <Text className="page-sub">Control total de existencias, precios y márgenes de utilidad.</Text>
         </div>
         {canManage && (
           <Space>
-            <Button loading={exporting} onClick={handleExportExcel}>
-              Descargar Excel
+            <Button loading={exporting} icon={<FileExcelOutlined />} onClick={handleExportExcel}>
+              Exportar Todo
             </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => handleOpenModal()}>
-              Nuevo Producto
+            <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => navigate('/inventario/nuevo')}>
+              Registrar Producto
             </Button>
           </Space>
         )}
       </div>
 
-      <Card bordered={false} bodyStyle={{ padding: 0 }}>
-        <div style={{ padding: 16 }}>
-          <Input 
-            id="inventario-search"
-            placeholder="Buscar por nombre o código de barras (F10)..." 
-            prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
-            allowClear
-            size="large"
-            value={busqueda}
-            onChange={e => setBusqueda(e.target.value)}
-            style={{ maxWidth: 400 }}
-          />
+      <Card bordered={false} bodyStyle={{ padding: 0 }} className="dashboard-card shadow-sm">
+        <div style={{ padding: '20px 24px' }}>
+          <Row gutter={16} align="middle">
+            <Col xs={24} lg={14}>
+              <Input 
+                id="inventario-search"
+                placeholder="Escanee un código o escriba nombre del producto (F10)..." 
+                prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
+                allowClear
+                size="large"
+                value={busqueda}
+                onChange={e => setBusqueda(e.target.value)}
+                style={{ width: '100%', borderRadius: 8 }}
+              />
+            </Col>
+            <Col xs={24} lg={10} style={{ textAlign: 'right', marginTop: { xs: 12, lg: 0 } }}>
+              <Space size="large">
+                <Space>
+                  <Switch 
+                    checked={stockBajoFilter} 
+                    onChange={setStockBajoFilter} 
+                    size="small"
+                  />
+                  <Text strong style={{ fontSize: 13, color: stockBajoFilter ? '#ff4d4f' : 'inherit' }}>
+                    Alertas de Stock Bajo
+                  </Text>
+                </Space>
+                <Tag color="blue" icon={<SyncOutlined spin={loading} />}>
+                  {data.length} Productos
+                </Tag>
+              </Space>
+            </Col>
+          </Row>
         </div>
+        
         <Table 
           columns={columns} 
           dataSource={data} 
           rowKey="_id" 
           loading={loading}
-          pagination={{ pageSize: 15 }}
+          pagination={{ 
+            pageSize: 12,
+            showSizeChanger: true,
+            pageSizeOptions: ['12', '24', '50', '100']
+          }}
+          className="custom-table"
+          scroll={{ x: 800 }}
         />
-        <div className="pos-shortcuts-bar" style={{ padding: '12px 24px', borderTop: '1px solid #f0f0f0' }}>
-            <span><Tag color="blue">F10</Tag> Buscar</span>
-            <Divider type="vertical" />
-            <span className={isScanning ? 'scanner-active-pulse' : ''}>
-              <Tag color={isScanning ? 'success' : 'default'} icon={<BarcodeOutlined />}>
-                {isScanning ? 'Escaneando...' : 'Scanner Listo'}
-              </Tag>
-            </span>
+
+        <div className="pos-shortcuts-bar" style={{ padding: '12px 24px', borderTop: '1px solid #f0f0f0', background: '#fafafa' }}>
+            <Space split={<Divider type="vertical" />}>
+              <span><Tag color="blue">F10</Tag> Buscar rápido</span>
+              <span className={isScanning ? 'scanner-active-pulse' : ''}>
+                <Tag color={isScanning ? 'success' : 'default'} icon={<BarcodeOutlined />}>
+                  {isScanning ? 'LECTURA DETECTADA' : 'ESCÁNER LISTO'}
+                </Tag>
+              </span>
+            </Space>
         </div>
       </Card>
-
-      {/* Modal CRUD */}
-      <Modal
-        title={editingProducto ? 'Editar Producto' : 'Crear Producto'}
-        open={isModalVisible}
-        onCancel={() => setIsModalVisible(false)}
-        onOk={() => form.submit()}
-        width={700}
-        okText={editingProducto ? 'Actualizar' : 'Crear'}
-      >
-        <Form form={form} layout="vertical" onFinish={onFinish} onValuesChange={handleFormValuesChange}>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="nombre" label="Nombre del Producto" rules={[{ required: true }]}>
-                <Input placeholder="Ej: Coca Cola 3 Litros" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="codigo" label="Código de Barras">
-                <Input
-                  id="form_item_codigo"
-                  placeholder="Escanee o ingrese código"
-                  prefix={<BarcodeOutlined />}
-                />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="precioCompra" label="Precio Compra" rules={[{ required: true }]}>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  min={0}
-                  step={0.01}
-                  formatter={val => `C$ ${val}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                  parser={val => val.replace(/C\$\s?|(,*)/g, '')}
-                />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="precioVenta" label="Precio Venta" rules={[{ required: true }]}>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  min={0}
-                  step={0.01}
-                  formatter={val => `C$ ${val}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-                  parser={val => val.replace(/C\$\s?|(,*)/g, '')}
-                />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item
-                name="margenGanancia"
-                label="Margen (%)"
-                tooltip="Ingrese un entero. Precio Venta = Precio Compra / (1 - (Margen/100)). Si ajusta el Precio Venta manualmente (redondeo), se recalcula el Margen."
-                rules={[
-                  { required: true, message: 'Ingrese el margen (%)' },
-                  {
-                    validator: async (_, value) => {
-                      if (value === undefined || value === null || value === '') return;
-                      const m = Number(value);
-                      if (!isFinite(m) || m < 0 || m >= 100) {
-                        throw new Error('El margen debe ser un número entre 0 y 99');
-                      }
-                    },
-                  },
-                ]}
-              >
-                <InputNumber style={{ width: '100%' }} min={0} max={99} step={1} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="categoria" label="Categoría" initialValue="General">
-                <Select>
-                  {Array.from(
-                    new Set([
-                      'General',
-                      ...(categorias || []).map((c) => c?.nombre).filter(Boolean),
-                      ...(categoriaValue ? [categoriaValue] : []),
-                    ])
-                  ).map((nombre) => (
-                    <Option key={nombre} value={nombre}>
-                      {nombre}
-                    </Option>
-                  ))}
-                </Select>
-              </Form.Item>
-            </Col>
-
-            <Col span={8}>
-              <Form.Item
-                name="controlaStock"
-                label="Control de Stock"
-                valuePropName="checked"
-                tooltip="Si está apagado, el producto se puede vender sin afectar inventario (ej: café, sándwich)."
-              >
-                <Switch checkedChildren="Sí" unCheckedChildren="No" />
-              </Form.Item>
-            </Col>
-
-            <Form.Item noStyle shouldUpdate={(prev, cur) => prev.controlaStock !== cur.controlaStock}>
-              {({ getFieldValue, setFieldsValue }) => {
-                const controlaStock = getFieldValue('controlaStock') !== false;
-                if (!controlaStock) {
-                  const s = getFieldValue('stock');
-                  const sm = getFieldValue('stockMinimo');
-                  if (Number(s) !== 0 || Number(sm) !== 0) {
-                    setFieldsValue({ stock: 0, stockMinimo: 0 });
-                  }
-                }
-
-                return (
-                  <>
-                    <Col span={8}>
-                      <Form.Item name="stock" label="Stock Inicial" rules={[{ required: true }]}>
-                        <InputNumber style={{ width: '100%' }} min={0} disabled={!controlaStock} />
-                      </Form.Item>
-                    </Col>
-                    <Col span={8}>
-                      <Form.Item name="stockMinimo" label="Stock Mínimo" initialValue={5}>
-                        <InputNumber style={{ width: '100%' }} min={0} disabled={!controlaStock} />
-                      </Form.Item>
-                    </Col>
-                  </>
-                );
-              }}
-            </Form.Item>
-            <Col span={8}>
-              <Form.Item name="proveedorId" label="Proveedor">
-                <Select placeholder="Seleccione..." allowClear>
-                  {proveedores.map(p => (
-                    <Option key={p._id} value={p._id}>{p.nombre}</Option>
-                  ))}
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col span={24}>
-              <Form.Item name="descripcion" label="Descripción (Opcional)">
-                <Input.TextArea rows={2} />
-              </Form.Item>
-            </Col>
-
-            <Col span={24}>
-              <Divider orientation="left" style={{ marginTop: 4 }}>Código de barras (opcional)</Divider>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10 }}>
-                <Space size={10}>
-                  <Switch
-                    checked={barcodeAssistEnabled}
-                    onChange={(checked) => {
-                      setBarcodeAssistEnabled(checked);
-                      if (checked) {
-                        const current = String(form.getFieldValue('codigo') || '').trim();
-                        if (!current) form.setFieldsValue({ codigo: generateEan13() });
-                      }
-                    }}
-                    checkedChildren="Sí"
-                    unCheckedChildren="No"
-                  />
-                  <Text>Ayuda con código de barras</Text>
-                </Space>
-
-                {barcodeAssistEnabled && (
-                  <Space.Compact>
-                    <Button size="small" onClick={() => form.setFieldsValue({ codigo: generateEan13() })}>
-                      Generar
-                    </Button>
-                    <Button size="small" disabled={!String(form.getFieldValue('codigo') || '').trim()} onClick={downloadBarcodePng}>
-                      Descargar
-                    </Button>
-                  </Space.Compact>
-                )}
-              </div>
-
-              {barcodeAssistEnabled && (
-                <div style={{ marginBottom: 8 }}>
-                  <div style={{ overflow: 'hidden' }}>
-                    <canvas
-                      ref={barcodeCanvasRef}
-                      style={{ maxWidth: '100%', background: '#fff', border: '1px dashed #d9d9d9', borderRadius: 8 }}
-                    />
-                  </div>
-                  {barcodeError && (
-                    <Text type="danger" style={{ fontSize: 12 }}>
-                      {barcodeError}
-                    </Text>
-                  )}
-                  {!barcodeError && String(form.getFieldValue('codigo') || '').trim() && (
-                    <Text type="secondary" style={{ fontSize: 11 }}>
-                      Formato: {getBarcodeFormat(form.getFieldValue('codigo'))}
-                    </Text>
-                  )}
-                </div>
-              )}
-            </Col>
-          </Row>
-        </Form>
-      </Modal>
 
       {/* Modal Kardex */}
       <Modal
         title={
           <Space>
-            <HistoryOutlined />
+            <HistoryOutlined style={{ color: '#1677ff' }} />
             <span>Kardex: {editingProducto?.nombre}</span>
           </Space>
         }
         open={isKardexVisible}
         onCancel={() => setIsKardexVisible(false)}
         footer={null}
-        width={800}
+        width={850}
+        className="custom-modal"
       >
         <Table 
           dataSource={kardexData}
           rowKey="_id"
           size="small"
+          pagination={{ pageSize: 10 }}
           columns={[
-            { title: 'Fecha', dataIndex: 'createdAt', render: val => formatDateTime(val) },
+            { title: 'Fecha', dataIndex: 'createdAt', render: val => formatDateTime(val), width: 170 },
             { 
               title: 'Tipo', 
               dataIndex: 'tipo', 
+              width: 100,
               render: val => (
                 <Tag color={val === 'entrada' ? 'green' : val === 'salida' ? 'red' : 'orange'}>
                   {val.toUpperCase()}
                 </Tag>
               )
             },
-            { title: 'Cant.', dataIndex: 'cantidad', align: 'center' },
-            { title: 'Stock Ant.', dataIndex: 'stockAnterior', align: 'center' },
-            { title: 'Nuevo Stock', dataIndex: 'stockNuevo', align: 'center', render: val => <Text strong>{val}</Text> },
+            { title: 'Cant.', dataIndex: 'cantidad', align: 'center', width: 80 },
+            { title: 'Stock Ant.', dataIndex: 'stockAnterior', align: 'center', width: 100 },
+            { title: 'Nuevo Stock', dataIndex: 'stockNuevo', align: 'center', width: 100, render: val => <Text strong>{val}</Text> },
             { title: 'Motivo', dataIndex: 'motivo', ellipsis: true },
-            { title: 'Usuario', dataIndex: 'usuarioId', render: val => val?.nombre }
+            { title: 'Usuario', dataIndex: 'usuarioId', width: 120, render: val => val?.nombre }
           ]}
         />
       </Modal>
