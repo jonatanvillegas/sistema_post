@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Table, Card, Button, Input, Space, Typography, Tag, 
   Modal, Form, InputNumber, Row, Col, Divider, 
-  List, message, Alert, Tabs, Badge, Select
+  List, message, Alert, Tabs, Badge, Select, Tooltip
 } from 'antd';
 import { 
   UserOutlined, SearchOutlined, PlusOutlined, 
@@ -270,16 +270,20 @@ export default function ClientesPage() {
     },
     {
       title: 'Acciones',
+      align: 'right',
+      width: 150,
       render: (_, record) => (
-        <Space>
-          <Button 
-            icon={<EditOutlined />} 
-            onClick={() => { 
-              setEditingCliente(record); 
-              form.setFieldsValue(record); 
-              setIsModalVisible(true); 
-            }} 
-          />
+        <Space size="small">
+          <Tooltip title="Editar">
+            <Button 
+              icon={<EditOutlined />} 
+              onClick={() => { 
+                setEditingCliente(record); 
+                form.setFieldsValue(record); 
+                setIsModalVisible(true); 
+              }} 
+            />
+          </Tooltip>
           <Button 
             type="primary" 
             icon={<HistoryOutlined />} 
@@ -322,6 +326,7 @@ export default function ClientesPage() {
           dataSource={clientes} 
           loading={loading}
           rowKey="_id"
+          scroll={{ x: true }}
         />
       </Card>
 
@@ -377,11 +382,12 @@ export default function ClientesPage() {
           style={{ marginBottom: 20, fontSize: 16, fontWeight: 'bold' }}
         />
 
-        <Table
-          loading={loadingCreditos}
-          dataSource={creditos}
-          rowKey="_id"
-          columns={[
+          <Table
+            loading={loadingCreditos}
+            dataSource={creditos}
+            rowKey="_id"
+            scroll={{ x: true }}
+            columns={[
             { title: 'Venta', dataIndex: ['ventaId', 'numeroVenta'] },
             { title: 'Fecha', dataIndex: 'createdAt', render: (v) => new Date(v).toLocaleDateString() },
             { title: 'Monto Total', dataIndex: 'montoTotal', render: (v) => formatCurrency(v) },
@@ -471,6 +477,7 @@ export default function ClientesPage() {
               pagination={false}
               rowKey={(_r, idx) => idx}
               dataSource={detalleCredito?.ventaId?.productos || []}
+              scroll={{ x: true }}
               columns={[
                 { title: 'Producto', dataIndex: 'nombre' },
                 { title: 'Código', dataIndex: 'codigo', width: 120 },
@@ -510,6 +517,7 @@ export default function ClientesPage() {
           pagination={false}
           rowKey="key"
           dataSource={lineItems}
+          scroll={{ x: true }}
           columns={[
             {
               title: 'Producto',

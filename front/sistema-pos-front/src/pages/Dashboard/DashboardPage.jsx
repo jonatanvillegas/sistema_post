@@ -203,6 +203,7 @@ export default function DashboardPage() {
               pagination={false}
               size="middle"
               rowKey="_id"
+              scroll={{ x: true }}
               columns={[
                 { 
                   title: 'Producto', 

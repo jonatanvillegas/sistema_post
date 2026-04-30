@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Row, Col, Card, Typography, Button, Table, Tag, Modal, 
   Form, InputNumber, Space, Divider, Statistic, Input,
-  Tabs, DatePicker, Empty
+  Tabs, DatePicker, Empty, Tooltip
 } from 'antd';
 import { 
   CheckCircleOutlined, LockOutlined, UnlockOutlined, 
@@ -208,22 +208,27 @@ export default function CajaPage() {
     {
       title: 'Acciones',
       align: 'right',
+      width: 150,
       render: (_, record) => record.fechaCierre && (
-        <Space>
-          <Button 
-            icon={<EyeOutlined />} 
-            size="small" 
-            onClick={() => { setSelectedCajaHistorial(record); setIsModalDetalleVisible(true); }}
-          >
-            Detalle
-          </Button>
-          <Button 
-            icon={<RiseOutlined />} 
-            size="small" 
-            onClick={() => descargarReporteTransacciones(record._id)}
-          >
-            Movs.
-          </Button>
+        <Space size="small">
+          <Tooltip title="Ver Detalle de Arqueo">
+            <Button 
+              icon={<EyeOutlined />} 
+              size="small" 
+              onClick={() => { setSelectedCajaHistorial(record); setIsModalDetalleVisible(true); }}
+            >
+              Detalle
+            </Button>
+          </Tooltip>
+          <Tooltip title="Descargar Movimientos">
+            <Button 
+              icon={<RiseOutlined />} 
+              size="small" 
+              onClick={() => descargarReporteTransacciones(record._id)}
+            >
+              Movs.
+            </Button>
+          </Tooltip>
         </Space>
       )
     }
@@ -292,14 +297,15 @@ export default function CajaPage() {
                 </Col>
                 <Col xs={24} lg={15}>
                   <Card title={<span><SwapOutlined /> Movimientos del Turno</span>} bordered={false} bodyStyle={{ padding: 0 }}>
-                    <Table 
-                      columns={columnsMovimientos} 
-                      dataSource={movimientosTurno} 
-                      pagination={{ pageSize: 15 }}
-                      size="middle"
-                      locale={{ emptyText: 'Sin movimientos registrados' }}
-                      loading={loading}
-                    />
+                      <Table 
+                        columns={columnsMovimientos} 
+                        dataSource={movimientosTurno} 
+                        pagination={{ pageSize: 15 }}
+                        size="middle"
+                        locale={{ emptyText: 'Sin movimientos registrados' }}
+                        loading={loading}
+                        scroll={{ x: true }}
+                      />
                   </Card>
                 </Col>
               </Row>
@@ -323,6 +329,7 @@ export default function CajaPage() {
                   dataSource={historialData.cajas} 
                   rowKey="_id" 
                   loading={loading}
+                  scroll={{ x: true }}
                   pagination={{ 
                     total: historialData.total, 
                     current: filtrosHistorial.page,

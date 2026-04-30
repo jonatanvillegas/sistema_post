@@ -90,8 +90,9 @@ export default function CategoriasPage() {
       title: 'Acciones',
       key: 'acciones',
       align: 'right',
+      width: 120,
       render: (_, record) => (
-        <Space>
+        <Space size="small">
           <Button size="small" icon={<EditOutlined />} onClick={() => openModal(record)} />
           <Popconfirm title="¿Eliminar categoría?" onConfirm={() => handleDelete(record._id)}>
             <Button size="small" danger icon={<DeleteOutlined />} />
@@ -119,6 +120,7 @@ export default function CategoriasPage() {
           dataSource={data}
           rowKey="_id"
           loading={loading}
+          scroll={{ x: true }}
           pagination={{ pageSize: 15 }}
         />
       </Card>

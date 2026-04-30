@@ -45,6 +45,7 @@ const adminItems = [
 
 export default function AppLayout() {
   const [collapsed, setCollapsed] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const { usuario, logout, isAdmin, isCajero, isInventario, getHomePath } = useAuthStore();
@@ -93,16 +94,33 @@ export default function AppLayout() {
       <Sider
         className="app-sidebar"
         width={220}
-        collapsedWidth={64}
+        collapsedWidth={0}
+        breakpoint="lg"
         collapsed={collapsed}
+        onCollapse={(value) => setCollapsed(value)}
+        onBreakpoint={(broken) => setIsMobile(broken)}
         theme="dark"
+        trigger={null}
+        style={{
+          position: isMobile ? 'fixed' : 'fixed',
+          zIndex: 1001,
+          height: '100vh',
+        }}
       >
-        <div className="sidebar-logo" onClick={() => navigate(getHomePath())}>
-          <div className="sidebar-logo-icon">
-            <AppstoreOutlined />
+        <div className="sidebar-logo">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }} onClick={() => { navigate(getHomePath()); if(isMobile) setCollapsed(true); }}>
+            <div className="sidebar-logo-icon">
+              <AppstoreOutlined />
+            </div>
+            {!collapsed && (
+              <span className="sidebar-logo-text">Sistema POS</span>
+            )}
           </div>
-          {!collapsed && (
-            <span className="sidebar-logo-text">Sistema POS</span>
+          {isMobile && !collapsed && (
+            <MenuFoldOutlined 
+              style={{ color: '#fff', fontSize: 20, cursor: 'pointer' }} 
+              onClick={() => setCollapsed(true)} 
+            />
           )}
         </div>
 
@@ -111,7 +129,7 @@ export default function AppLayout() {
           mode="inline"
           selectedKeys={[location.pathname]}
           items={allMenuItems}
-          onClick={handleMenuClick}
+          onClick={(e) => { handleMenuClick(e); if(isMobile) setCollapsed(true); }}
           style={{ flex: 1, borderRight: 0, paddingTop: 8 }}
         />
 
@@ -131,10 +149,21 @@ export default function AppLayout() {
         )}
       </Sider>
 
-      <Layout style={{ marginLeft: collapsed ? 64 : 220, transition: 'margin-left 0.2s' }}>
-        <Header className="app-header" style={{ left: collapsed ? 64 : 220 }}>
+      <Layout className="main-layout-container" style={{ 
+        marginLeft: (collapsed || isMobile) ? 0 : 220, 
+        transition: 'margin-left 0.2s',
+        width: '100%',
+        minWidth: 0
+      }}>
+        <Header className="app-header" style={{ 
+          left: (collapsed || isMobile) ? 0 : 220,
+          width: (collapsed || isMobile) ? '100%' : 'calc(100% - 220px)',
+          transition: 'all 0.2s',
+          zIndex: 1000
+        }}>
           <div className="header-left">
             <span
+              className="sidebar-trigger"
               style={{ cursor: 'pointer', fontSize: 18, color: '#595959' }}
               onClick={() => setCollapsed(!collapsed)}
             >

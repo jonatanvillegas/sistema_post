@@ -291,6 +291,7 @@ export default function VentasHistoryPage() {
           columns={columns}
           dataSource={ventas}
           loading={loading}
+          scroll={{ x: true }}
           pagination={{
             current: page,
             pageSize: limit,
@@ -353,6 +354,7 @@ export default function VentasHistoryPage() {
               rowKey={(r) => r.productoId?._id || r.productoId}
               pagination={false}
               size="small"
+              scroll={{ x: true }}
               columns={[
                 {
                   title: 'Producto',

@@ -826,6 +826,7 @@ export default function VentasPage() {
               rowKey={(r) => r.productoId?._id || r.productoId}
               pagination={false}
               size="small"
+              scroll={{ x: true }}
               columns={[
                 {
                   title: 'Producto',

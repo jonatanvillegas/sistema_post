@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Table, Card, Button, Input, Space, Typography, Tag, 
   Modal, Form, InputNumber, Select, Row, Col, Divider, 
-  List, Alert, Popconfirm
+  List, Alert, Popconfirm, Tooltip
 } from 'antd';
 import { 
   PlusOutlined, SearchOutlined, EditOutlined, 
@@ -273,13 +273,20 @@ export default function ProveedoresPage() {
     {
       title: 'Acciones',
       align: 'right',
+      width: 120,
       render: (_, record) => (
-        <Space>
-          <Button icon={<EditOutlined />} size="small" onClick={() => handleOpenModal(record)} />
-          <Button icon={<ShoppingCartOutlined />} size="small" onClick={() => openComprasProveedor(record)} />
+        <Space size="small">
+          <Tooltip title="Editar">
+            <Button icon={<EditOutlined />} size="small" onClick={() => handleOpenModal(record)} />
+          </Tooltip>
+          <Tooltip title="Ver Compras">
+            <Button icon={<ShoppingCartOutlined />} size="small" onClick={() => openComprasProveedor(record)} />
+          </Tooltip>
           {isAdmin() && (
             <Popconfirm title="¿Desactivar proveedor?" onConfirm={() => handleDelete(record._id)}>
-              <Button icon={<DeleteOutlined />} size="small" danger ghost />
+              <Tooltip title="Eliminar">
+                <Button icon={<DeleteOutlined />} size="small" danger ghost />
+              </Tooltip>
             </Popconfirm>
           )}
         </Space>
@@ -318,6 +325,7 @@ export default function ProveedoresPage() {
           dataSource={proveedores} 
           rowKey="_id" 
           loading={loading}
+          scroll={{ x: true }}
           pagination={{ pageSize: 10 }}
         />
       </Card>
@@ -418,6 +426,7 @@ export default function ProveedoresPage() {
                     dataSource={compraItems}
                     rowKey="productoId"
                     pagination={false}
+                    scroll={{ x: true }}
                     columns={[
                         { title: 'Producto', dataIndex: 'nombre' },
                         { 
@@ -482,6 +491,7 @@ export default function ProveedoresPage() {
           rowKey="_id"
           loading={loadingCompras}
           dataSource={comprasProveedor}
+          scroll={{ x: true }}
           pagination={{ pageSize: 10 }}
           columns={[
             { title: 'Fecha', dataIndex: 'fecha', render: (v) => formatDateTime(v) },
@@ -577,6 +587,7 @@ export default function ProveedoresPage() {
                 dataSource={compraItems}
                 rowKey="productoId"
                 pagination={false}
+                scroll={{ x: true }}
                 columns={[
                   { title: 'Producto', dataIndex: 'nombre' },
                   {

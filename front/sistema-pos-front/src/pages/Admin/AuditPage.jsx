@@ -128,6 +128,7 @@ export default function AuditPage() {
     {
       title: '',
       key: 'acciones',
+      align: 'right',
       width: 50,
       render: (_, record) => (
         <Tooltip title="Ver más">
@@ -201,6 +202,7 @@ export default function AuditPage() {
           rowKey="_id"
           loading={loading}
           size="middle"
+          scroll={{ x: true }}
           pagination={{
             total,
             current: filtros.page,

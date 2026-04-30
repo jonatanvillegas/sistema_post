@@ -228,7 +228,7 @@ export default function ArqueoPage() {
 
         <Col xs={24} lg={12}>
           <Card title="Efectivo NIO">
-            <div style={{ height: '50vh', overflowY: 'auto' }}>
+            <div style={{ maxHeight: 400, overflowY: 'auto' }}>
               {denominacionesNIO.map(d => (
                 <div key={d.denominacion} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, padding: 8, background: '#f5f5f5', borderRadius: 8 }}>
                   <Text strong>{d.denominacion >= 1 ? d.denominacion : `${(d.denominacion * 100).toFixed(0)}c`}</Text>
@@ -236,8 +236,9 @@ export default function ArqueoPage() {
                     min={0} 
                     value={billetajeNIO.find(b => b.denominacion === d.denominacion)?.cantidad || 0}
                     onChange={v => updateBilletajeNIO(d.denominacion, v)}
+                    style={{ width: 80 }}
                   />
-                  <Text style={{ width: 100, textAlign: 'right' }}>{formatCurrency(d.denominacion * (billetajeNIO.find(b => b.denominacion === d.denominacion)?.cantidad || 0))}</Text>
+                  <Text style={{ width: 100, textAlign: 'right', fontSize: 12 }}>{formatCurrency(d.denominacion * (billetajeNIO.find(b => b.denominacion === d.denominacion)?.cantidad || 0))}</Text>
                 </div>
               ))}
             </div>
@@ -246,7 +247,7 @@ export default function ArqueoPage() {
 
         <Col xs={24} lg={12}>
           <Card title="Efectivo USD">
-            <div style={{ height: '50vh', overflowY: 'auto' }}>
+            <div style={{ maxHeight: 400, overflowY: 'auto' }}>
               {denominacionesUSD.map(d => (
                 <div key={d.denominacion} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, padding: 8, background: '#f6ffed', borderRadius: 8 }}>
                   <Text strong>${d.denominacion}</Text>
@@ -254,8 +255,9 @@ export default function ArqueoPage() {
                     min={0} 
                     value={billetajeUSD.find(b => b.denominacion === d.denominacion)?.cantidad || 0}
                     onChange={v => updateBilletajeUSD(d.denominacion, v)}
+                    style={{ width: 80 }}
                   />
-                  <Text style={{ width: 100, textAlign: 'right' }}>${(d.denominacion * (billetajeUSD.find(b => b.denominacion === d.denominacion)?.cantidad || 0)).toFixed(2)}</Text>
+                  <Text style={{ width: 100, textAlign: 'right', fontSize: 12 }}>${(d.denominacion * (billetajeUSD.find(b => b.denominacion === d.denominacion)?.cantidad || 0)).toFixed(2)}</Text>
                 </div>
               ))}
             </div>

@@ -150,6 +150,7 @@ export default function VentasReportePage() {
           rowKey="_id"
           loading={loading}
           dataSource={ventasFiltradas}
+          scroll={{ x: true }}
           pagination={{ pageSize: 20 }}
           columns={[
             {
@@ -207,8 +208,9 @@ export default function VentasReportePage() {
               title: 'Acciones',
               key: 'acciones',
               align: 'right',
+              width: 120,
               render: (_, record) => (
-                <Space>
+                <Space size="small">
                   <Tooltip title="Ver Detalles">
                     <Button 
                       size="small" 
@@ -281,6 +283,7 @@ export default function VentasReportePage() {
               rowKey={(r) => r.productoId?._id || r.productoId}
               pagination={false}
               size="small"
+              scroll={{ x: true }}
               columns={[
                 {
                   title: 'Producto',

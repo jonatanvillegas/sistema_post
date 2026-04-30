@@ -268,8 +268,9 @@ export default function InventarioPage() {
       title: 'Acciones',
       key: 'acciones',
       align: 'right',
+      width: 150,
       render: (_, record) => (
-        <Space>
+        <Space size="small">
            <Tooltip title="Ver Código">
              <Button 
                icon={<BarcodeOutlined />} 
@@ -303,16 +304,20 @@ export default function InventarioPage() {
            </Tooltip>
            {canManage && (
              <>
-               <Button 
-                icon={<EditOutlined />} 
-                size="small" 
-                type="primary" 
-                ghost 
-                onClick={() => navigate(`/inventario/editar/${record._id}`)} 
-               />
+               <Tooltip title="Editar">
+                 <Button 
+                  icon={<EditOutlined />} 
+                  size="small" 
+                  type="primary" 
+                  ghost 
+                  onClick={() => navigate(`/inventario/editar/${record._id}`)} 
+                 />
+               </Tooltip>
                {isAdmin() && (
                  <Popconfirm title="¿Eliminar producto?" onConfirm={() => handleDelete(record._id)}>
-                   <Button icon={<DeleteOutlined />} size="small" danger ghost />
+                   <Tooltip title="Eliminar">
+                    <Button icon={<DeleteOutlined />} size="small" danger ghost />
+                   </Tooltip>
                  </Popconfirm>
                )}
              </>

@@ -369,6 +369,7 @@ export default function AjustesPage() {
                 style={{ marginTop: 12 }}
                 size="small"
                 rowKey={(r) => `${r.database}-${r.collection}`}
+                scroll={{ x: true }}
                 pagination={{ pageSize: 10 }}
                 dataSource={previewData.collections || []}
                 columns={[

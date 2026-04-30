@@ -639,6 +639,26 @@ body {
   border-radius: 0 2px 2px 0;
 }
 .ant-tabs-nav { margin-bottom: 0 !important; }
+ 
+/* ===== TABLE IMPROVEMENTS ===== */
+.ant-table-thead > tr > th,
+.ant-table-tbody > tr > td {
+  white-space: nowrap !important;
+}
+
+.ant-table-column-title {
+  white-space: nowrap !important;
+}
+
+.ant-table-cell {
+  vertical-align: middle !important;
+}
+
+/* Forzar que los botones de acción en tablas estén siempre en una línea */
+.ant-table-cell .ant-space {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+}
 
 /* ===== SCANNER ANIMATIONS ===== */
 .scanner-active-pulse {
@@ -659,4 +679,59 @@ body {
   gap: 16px;
   font-size: 12px;
   color: #64748b;
+}
+/* ===== RESPONSIVE DESIGN ===== */
+@media (max-width: 991px) {
+  .page-inner {
+    padding: 16px;
+  }
+  
+  /* POS Responsive */
+  .pos-layout {
+    flex-direction: column;
+    height: auto;
+    overflow: visible;
+  }
+  .pos-right {
+    width: 100%;
+    border-left: none;
+    border-top: 1px solid #f0f0f0;
+    height: 600px; /* Altura fija para el carrito en móvil */
+  }
+  .pos-products-grid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    max-height: 400px;
+  }
+  
+  /* Page Header */
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .page-header .ant-space {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 575px) {
+  .login-left {
+    display: none;
+  }
+  .login-right {
+    width: 100%;
+    padding: 20px;
+  }
+  .login-card {
+    padding: 24px;
+  }
+  
+  .stat-value {
+    font-size: 22px;
+  }
+  
+  .pos-product-card {
+    padding: 8px;
+  }
 }

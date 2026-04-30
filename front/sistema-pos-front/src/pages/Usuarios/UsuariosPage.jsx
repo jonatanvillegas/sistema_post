@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Table, Card, Button, Typography, Tag, Modal, 
   Form, Input, Select, Space, Popconfirm, Avatar, Badge,
-  Alert, Row, Col
+  Alert, Row, Col, Tooltip
 } from 'antd';
 import { 
   PlusOutlined, UserOutlined, EditOutlined, 
@@ -129,18 +129,23 @@ export default function UsuariosPage() {
     {
       title: 'Acciones',
       align: 'right',
+      width: 100,
       render: (_, record) => (
-        <Space>
-          <Button 
-            icon={<EditOutlined />} 
-            size="small" 
-            type="primary" 
-            ghost 
-            onClick={() => handleOpenModal(record)} 
-          />
+        <Space size="small">
+          <Tooltip title="Editar">
+            <Button 
+              icon={<EditOutlined />} 
+              size="small" 
+              type="primary" 
+              ghost 
+              onClick={() => handleOpenModal(record)} 
+            />
+          </Tooltip>
           {record._id !== currentUser._id && (
             <Popconfirm title="¿Eliminar este usuario?" onConfirm={() => handleDelete(record._id)}>
-              <Button icon={<DeleteOutlined />} size="small" danger ghost />
+              <Tooltip title="Eliminar">
+                <Button icon={<DeleteOutlined />} size="small" danger ghost />
+              </Tooltip>
             </Popconfirm>
           )}
         </Space>
@@ -174,6 +179,7 @@ export default function UsuariosPage() {
           dataSource={data} 
           rowKey="_id" 
           loading={loading}
+          scroll={{ x: true }}
           pagination={false}
         />
       </Card>
