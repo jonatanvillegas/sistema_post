@@ -375,10 +375,206 @@ const updateCreditoVentaProductos = async (req, res) => {
   }
 };
 
+// ─── Resumen de Cuentas por Cobrar (Antigüedad de saldos) ───
+const getResumenCuentasCobrar = async (req, res) => {
+  try {
+    const ahora = new Date();
+    const hace30 = new Date(ahora); hace30.setDate(hace30.getDate() - 30);
+    const hace60 = new Date(ahora); hace60.setDate(hace60.getDate() - 60);
+    const hace90 = new Date(ahora); hace90.setDate(hace90.getDate() - 90);
+
+    // Actualizar vencidos automáticamente
+    await Credito.updateMany(
+      { estado: 'pendiente', fechaVencimiento: { $lt: ahora } },
+      { $set: { estado: 'vencido' } }
+    );
+
+    const creditos = await Credito.find({ estado: { $in: ['pendiente', 'vencido'] } })
+      .populate('clienteId', 'nombre nit telefono')
+      .populate('ventaId', 'numeroVenta total fecha')
+      .sort({ fechaVencimiento: 1 });
+
+    let totalPendiente = 0;
+    let rango030 = 0;
+    let rango3160 = 0;
+    let rango6190 = 0;
+    let rangoMas90 = 0;
+    const clientesMap = {};
+
+    for (const c of creditos) {
+      totalPendiente += c.saldoPendiente;
+      const diasVencido = Math.max(0, Math.floor((ahora - c.fechaVencimiento) / (1000 * 60 * 60 * 24)));
+
+      if (diasVencido <= 30) rango030 += c.saldoPendiente;
+      else if (diasVencido <= 60) rango3160 += c.saldoPendiente;
+      else if (diasVencido <= 90) rango6190 += c.saldoPendiente;
+      else rangoMas90 += c.saldoPendiente;
+
+      const cid = String(c.clienteId?._id || c.clienteId);
+      if (!clientesMap[cid]) {
+        clientesMap[cid] = {
+          clienteId: c.clienteId,
+          nombre: c.clienteId?.nombre || 'Sin nombre',
+          nit: c.clienteId?.nit || '',
+          telefono: c.clienteId?.telefono || '',
+          totalDeuda: 0,
+          creditosActivos: 0,
+          creditoMasAntiguo: c.fechaVencimiento,
+        };
+      }
+      clientesMap[cid].totalDeuda += c.saldoPendiente;
+      clientesMap[cid].creditosActivos += 1;
+      if (c.fechaVencimiento < clientesMap[cid].creditoMasAntiguo) {
+        clientesMap[cid].creditoMasAntiguo = c.fechaVencimiento;
+      }
+    }
+
+    const clientesResumen = Object.values(clientesMap).sort((a, b) => b.totalDeuda - a.totalDeuda);
+
+    res.json({
+      totalPendiente,
+      totalCreditos: creditos.length,
+      antiguedad: {
+        rango030,
+        rango3160,
+        rango6190,
+        rangoMas90,
+      },
+      clientes: clientesResumen,
+      creditos,
+    });
+  } catch (error) {
+    console.error('Error getResumenCuentasCobrar:', error);
+    res.status(500).json({ mensaje: 'Error al obtener resumen de cuentas por cobrar' });
+  }
+};
+
+// ─── Estado de cuenta por cliente ───
+const getEstadoCuentaCliente = async (req, res) => {
+  try {
+    const { clienteId } = req.params;
+    const cliente = await Cliente.findById(clienteId);
+    if (!cliente) return res.status(404).json({ mensaje: 'Cliente no encontrado' });
+
+    const creditos = await Credito.find({ clienteId })
+      .populate('ventaId', 'numeroVenta total fecha productos')
+      .sort({ createdAt: -1 });
+
+    let totalDeuda = 0;
+    let totalAbonado = 0;
+    let totalFacturado = 0;
+    const historialAbonos = [];
+
+    for (const c of creditos) {
+      totalFacturado += c.montoTotal;
+      if (['pendiente', 'vencido'].includes(c.estado)) {
+        totalDeuda += c.saldoPendiente;
+      }
+      for (const abono of c.abonos) {
+        totalAbonado += abono.monto;
+        historialAbonos.push({
+          creditoId: c._id,
+          numeroVenta: c.ventaId?.numeroVenta || '',
+          monto: abono.monto,
+          fecha: abono.fecha,
+          metodoPago: abono.metodoPago,
+        });
+      }
+    }
+
+    historialAbonos.sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+
+    res.json({
+      cliente: {
+        _id: cliente._id,
+        nombre: cliente.nombre,
+        nit: cliente.nit,
+        telefono: cliente.telefono,
+        direccion: cliente.direccion,
+      },
+      resumen: {
+        totalFacturado,
+        totalAbonado,
+        totalDeuda,
+        creditosTotales: creditos.length,
+        creditosPendientes: creditos.filter(c => ['pendiente', 'vencido'].includes(c.estado)).length,
+      },
+      creditos,
+      historialAbonos,
+    });
+  } catch (error) {
+    console.error('Error getEstadoCuentaCliente:', error);
+    res.status(500).json({ mensaje: 'Error al obtener estado de cuenta' });
+  }
+};
+
+// ─── Reporte de Morosidad ───
+const getReporteMorosidad = async (req, res) => {
+  try {
+    const ahora = new Date();
+
+    const creditosVencidos = await Credito.find({
+      estado: 'vencido',
+    })
+      .populate('clienteId', 'nombre nit telefono')
+      .populate('ventaId', 'numeroVenta total fecha')
+      .sort({ fechaVencimiento: 1 });
+
+    const morosos = {};
+    for (const c of creditosVencidos) {
+      const cid = String(c.clienteId?._id || c.clienteId);
+      const diasVencido = Math.floor((ahora - c.fechaVencimiento) / (1000 * 60 * 60 * 24));
+
+      if (!morosos[cid]) {
+        morosos[cid] = {
+          clienteId: c.clienteId?._id,
+          nombre: c.clienteId?.nombre || 'Sin nombre',
+          nit: c.clienteId?.nit || '',
+          telefono: c.clienteId?.telefono || '',
+          totalDeudaVencida: 0,
+          creditosVencidos: 0,
+          diasMaxVencimiento: 0,
+          detalle: [],
+        };
+      }
+
+      morosos[cid].totalDeudaVencida += c.saldoPendiente;
+      morosos[cid].creditosVencidos += 1;
+      if (diasVencido > morosos[cid].diasMaxVencimiento) {
+        morosos[cid].diasMaxVencimiento = diasVencido;
+      }
+      morosos[cid].detalle.push({
+        creditoId: c._id,
+        numeroVenta: c.ventaId?.numeroVenta || '',
+        saldoPendiente: c.saldoPendiente,
+        fechaVencimiento: c.fechaVencimiento,
+        diasVencido,
+      });
+    }
+
+    const listaMorosos = Object.values(morosos).sort((a, b) => b.totalDeudaVencida - a.totalDeudaVencida);
+
+    const totalMorosidad = listaMorosos.reduce((sum, m) => sum + m.totalDeudaVencida, 0);
+
+    res.json({
+      totalMorosidad,
+      totalMorosos: listaMorosos.length,
+      totalCreditos: creditosVencidos.length,
+      morosos: listaMorosos,
+    });
+  } catch (error) {
+    console.error('Error getReporteMorosidad:', error);
+    res.status(500).json({ mensaje: 'Error al obtener reporte de morosidad' });
+  }
+};
+
 module.exports = {
   getCreditosByCliente,
   registrarAbono,
   getCreditosPendientes,
   getCreditoDetalle,
   updateCreditoVentaProductos,
+  getResumenCuentasCobrar,
+  getEstadoCuentaCliente,
+  getReporteMorosidad,
 };

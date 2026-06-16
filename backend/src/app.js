@@ -17,6 +17,11 @@ const adminRoutes = require('./modules/admin/admin.routes');
 const categoriasRoutes = require('./modules/categorias/categorias.routes');
 const auditRoutes = require('./modules/audit/audit.routes');
 const configRoutes = require('./modules/config/config.routes');
+const cotizacionesRoutes = require('./modules/cotizaciones/cotizaciones.routes');
+const devolucionesRoutes = require('./modules/devoluciones/devoluciones.routes');
+const reportesRoutes = require('./modules/reportes/reportes.routes');
+const etiquetasRoutes = require('./modules/etiquetas/etiquetas.routes');
+const ordenesCompraRoutes = require('./modules/ordenes-compra/ordenesCompra.routes');
 
 const app = express();
 
@@ -50,6 +55,11 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/categorias', categoriasRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/config', configRoutes);
+app.use('/api/cotizaciones', cotizacionesRoutes);
+app.use('/api/devoluciones', devolucionesRoutes);
+app.use('/api/reportes', reportesRoutes);
+app.use('/api/etiquetas', etiquetasRoutes);
+app.use('/api/ordenes-compra', ordenesCompraRoutes);
 
 // Servir frontend (build Vite) si existe.
 // Esto permite desplegar en un solo servicio (Coolify) con UI + API en el mismo dominio.

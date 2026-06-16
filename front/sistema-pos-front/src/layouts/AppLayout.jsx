@@ -8,7 +8,8 @@ import {
   DollarOutlined, TruckOutlined, UserOutlined, LogoutOutlined,
   SettingOutlined, BellOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
   AppstoreOutlined, ExclamationCircleOutlined,
-  BarChartOutlined, HistoryOutlined
+  BarChartOutlined, HistoryOutlined, FileTextOutlined, RollbackOutlined,
+  TagOutlined, FileDoneOutlined, CreditCardOutlined, PieChartOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '../store/authStore';
 import { useCajaStore } from '../store/cajaStore';
@@ -18,14 +19,20 @@ const { Sider, Header, Content } = Layout;
 const adminMenuItems = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: 'Dashboard' },
   { key: '/ventas', icon: <ShoppingCartOutlined />, label: 'Punto de Venta' },
+  { key: '/cotizaciones', icon: <FileTextOutlined />, label: 'Cotizaciones' },
+  { key: '/devoluciones', icon: <RollbackOutlined />, label: 'Devoluciones' },
   { key: '/inventario', icon: <InboxOutlined />, label: 'Inventario' },
   { key: '/caja', icon: <DollarOutlined />, label: 'Caja' },
   { key: '/proveedores', icon: <TruckOutlined />, label: 'Proveedores' },
+  { key: '/ordenes-compra', icon: <FileDoneOutlined />, label: 'Órdenes Compra' },
   { key: '/clientes', icon: <UserOutlined />, label: 'Clientes' },
+  { key: '/etiquetas', icon: <TagOutlined />, label: 'Etiquetas' },
 ];
 
 const cajeroMenuItems = [
   { key: '/ventas', icon: <ShoppingCartOutlined />, label: 'Punto de Venta' },
+  { key: '/cotizaciones', icon: <FileTextOutlined />, label: 'Cotizaciones' },
+  { key: '/devoluciones', icon: <RollbackOutlined />, label: 'Devoluciones' },
   { key: '/caja', icon: <DollarOutlined />, label: 'Caja' },
   { key: '/clientes', icon: <UserOutlined />, label: 'Clientes' },
 ];
@@ -33,9 +40,13 @@ const cajeroMenuItems = [
 const inventarioMenuItems = [
   { key: '/inventario', icon: <InboxOutlined />, label: 'Inventario' },
   { key: '/proveedores', icon: <TruckOutlined />, label: 'Proveedores' },
+  { key: '/ordenes-compra', icon: <FileDoneOutlined />, label: 'Órdenes Compra' },
+  { key: '/etiquetas', icon: <TagOutlined />, label: 'Etiquetas' },
 ];
 
 const adminItems = [
+  { key: '/reportes', icon: <PieChartOutlined />, label: 'Reportes Avanzados' },
+  { key: '/cuentas-cobrar', icon: <CreditCardOutlined />, label: 'Cuentas por Cobrar' },
   { key: '/ventas-reporte', icon: <BarChartOutlined />, label: 'Reporte de Ventas' },
   { key: '/usuarios', icon: <UserOutlined />, label: 'Usuarios' },
   { key: '/auditoria', icon: <HistoryOutlined />, label: 'Auditoría' },
