@@ -17,7 +17,7 @@ const movimientoCajaSchema = new mongoose.Schema(
   {
     concepto: { type: String, required: true },
     monto: { type: Number, required: true },
-    tipo: { type: String, enum: ['venta', 'venta_credito', 'ingreso_manual', 'egreso'], default: 'ingreso_manual' },
+    tipo: { type: String, enum: ['venta', 'venta_credito', 'ingreso_manual', 'ingreso_externo', 'egreso'], default: 'ingreso_manual' },
     ventaId: { type: mongoose.Schema.Types.ObjectId, ref: 'Venta', default: null },
     fecha: { type: Date, default: Date.now }
   },

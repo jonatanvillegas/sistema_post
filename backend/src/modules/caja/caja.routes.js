@@ -4,6 +4,7 @@ const {
   abrirCaja,
   cerrarCaja,
   getCajaActual,
+  registrarIngreso,
   registrarEgreso,
   getHistorialCaja,
   getCajaById,
@@ -15,6 +16,7 @@ const { authorizeRoles } = require('../../middlewares/role.middleware');
 router.post('/abrir', protect, abrirCaja);
 router.put('/cerrar/:id', protect, cerrarCaja);
 router.get('/actual', protect, getCajaActual);
+router.post('/ingreso', protect, registrarIngreso);
 router.post('/egreso', protect, registrarEgreso);
 router.get('/transacciones/export', protect, authorizeRoles('admin', 'cajero'), exportTransaccionesCaja);
 router.get('/historial', protect, authorizeRoles('admin', 'cajero'), getHistorialCaja);

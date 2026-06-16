@@ -58,6 +58,45 @@ const getProductoById = async (req, res) => {
   }
 };
 
+// @PUT /api/inventario/:id/dar-baja-danado
+const darBajaStockDanado = async (req, res) => {
+  try {
+    const { cantidad, motivo } = req.body;
+    const qty = Number(cantidad || 0);
+
+    if (!Number.isFinite(qty) || qty <= 0) {
+      return res.status(400).json({ mensaje: 'La cantidad a dar de baja debe ser mayor a cero' });
+    }
+
+    const producto = await Producto.findById(req.params.id);
+    if (!producto) return res.status(404).json({ mensaje: 'Producto no encontrado' });
+
+    const stockDanadoActual = Number(producto.stockDanado || 0);
+    if (stockDanadoActual < qty) {
+      return res.status(400).json({
+        mensaje: `Stock dañado insuficiente para "${producto.nombre}". Disponible: ${stockDanadoActual}`,
+      });
+    }
+
+    producto.stockDanado = stockDanadoActual - qty;
+    await producto.save();
+
+    await Kardex.create({
+      productoId: producto._id,
+      tipo: 'ajuste',
+      cantidad: qty,
+      stockAnterior: stockDanadoActual,
+      stockNuevo: producto.stockDanado,
+      motivo: motivo || 'Baja de producto dañado',
+      usuarioId: req.user._id,
+    });
+
+    res.json({ mensaje: 'Producto dañado dado de baja correctamente', producto });
+  } catch (error) {
+    res.status(500).json({ mensaje: 'Error al dar de baja stock dañado', error: error.message });
+  }
+};
+
 // @POST /api/inventario
 const createProducto = async (req, res) => {
   try {
@@ -191,6 +230,7 @@ const exportInventarioExcel = async (req, res) => {
       { header: 'Precio venta', key: 'precioVenta', width: 14 },
       { header: 'Controla stock', key: 'controlaStock', width: 14 },
       { header: 'Stock', key: 'stock', width: 10 },
+      { header: 'Stock dañado', key: 'stockDanado', width: 12 },
       { header: 'Stock mínimo', key: 'stockMinimo', width: 12 },
     ];
 
@@ -207,6 +247,7 @@ const exportInventarioExcel = async (req, res) => {
         precioVenta: Number(p?.precioVenta) || 0,
         controlaStock: p?.controlaStock === false ? 'No' : 'Sí',
         stock: Number(p?.stock) || 0,
+        stockDanado: Number(p?.stockDanado) || 0,
         stockMinimo: Number(p?.stockMinimo) || 0,
       });
     }
@@ -215,6 +256,7 @@ const exportInventarioExcel = async (req, res) => {
     ws.getColumn('precioCompra').numFmt = '#,##0.00';
     ws.getColumn('precioVenta').numFmt = '#,##0.00';
     ws.getColumn('stock').numFmt = '#,##0';
+    ws.getColumn('stockDanado').numFmt = '#,##0';
     ws.getColumn('stockMinimo').numFmt = '#,##0';
 
     const pad2 = (n) => String(n).padStart(2, '0');
@@ -236,6 +278,7 @@ module.exports = {
   getProductos,
   getStockBajo,
   getProductoById,
+  darBajaStockDanado,
   createProducto,
   updateProducto,
   deleteProducto,

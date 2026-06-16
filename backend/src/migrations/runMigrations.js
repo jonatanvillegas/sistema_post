@@ -12,6 +12,29 @@ const migrations = [
       );
     },
   },
+  {
+    id: '2026-06-15_add_stock_danado_y_estado_devoluciones',
+    description: 'Inicializa stockDanado en productos y estadoProducto en devoluciones.',
+    run: async () => {
+      const { Producto } = require('../modules/inventario/producto.model');
+      const Devolucion = require('../modules/devoluciones/devolucion.model');
+
+      await Producto.updateMany(
+        { stockDanado: { $exists: false } },
+        { $set: { stockDanado: 0 } }
+      );
+
+      await Devolucion.updateMany(
+        { stockDanadoRegistrado: { $exists: false } },
+        { $set: { stockDanadoRegistrado: false } }
+      );
+
+      await Devolucion.collection.updateMany(
+        { 'productos.estadoProducto': { $exists: false } },
+        { $set: { 'productos.$[].estadoProducto': 'bueno' } }
+      );
+    },
+  },
 ];
 
 const runMigrations = async () => {

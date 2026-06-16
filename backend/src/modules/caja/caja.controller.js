@@ -98,7 +98,7 @@ const cerrarCaja = async (req, res) => {
       .reduce((sum, i) => sum + toCents(i.monto), 0);
 
     const totalIngresosCents = (caja.ingresos || [])
-      .filter(i => i.tipo === 'ingreso_manual')
+      .filter(i => i.tipo === 'ingreso_manual' || i.tipo === 'ingreso_externo')
       .reduce((sum, i) => sum + toCents(i.monto), 0);
 
     const totalEgresosCents = (caja.egresos || [])
@@ -218,7 +218,7 @@ const getCajaActual = async (req, res) => {
       .reduce((sum, i) => sum + toCents(i.monto), 0);
 
     const totalIngresosCents = (caja.ingresos || [])
-      .filter((i) => i.tipo === 'ingreso_manual')
+      .filter((i) => i.tipo === 'ingreso_manual' || i.tipo === 'ingreso_externo')
       .reduce((sum, i) => sum + toCents(i.monto), 0);
 
     const totalEgresosCents = (caja.egresos || [])
@@ -243,6 +243,32 @@ const getCajaActual = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ mensaje: 'Error al obtener caja actual', error: error.message });
+  }
+};
+
+// @POST /api/caja/ingreso
+const registrarIngreso = async (req, res) => {
+  try {
+    const { concepto, monto } = req.body;
+    const montoNum = Number(monto || 0);
+
+    if (!concepto || !String(concepto).trim()) {
+      return res.status(400).json({ mensaje: 'El concepto es requerido' });
+    }
+
+    if (!Number.isFinite(montoNum) || montoNum <= 0) {
+      return res.status(400).json({ mensaje: 'El monto debe ser mayor a cero' });
+    }
+
+    const caja = await Caja.findOne({ estado: 'abierta' });
+    if (!caja) return res.status(404).json({ mensaje: 'No hay caja abierta' });
+
+    caja.ingresos.push({ concepto, monto: montoNum, tipo: 'ingreso_externo' });
+    await caja.save();
+
+    res.json({ mensaje: 'Ingreso registrado', caja });
+  } catch (error) {
+    res.status(500).json({ mensaje: 'Error al registrar ingreso', error: error.message });
   }
 };
 
@@ -426,6 +452,7 @@ module.exports = {
   abrirCaja,
   cerrarCaja,
   getCajaActual,
+  registrarIngreso,
   registrarEgreso,
   getHistorialCaja,
   getCajaById,

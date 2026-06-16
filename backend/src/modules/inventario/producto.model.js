@@ -33,6 +33,11 @@ const productoSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    stockDanado: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     stockMinimo: {
       type: Number,
       default: 5,
