@@ -7,7 +7,7 @@ import {
   DashboardOutlined, ShoppingCartOutlined, InboxOutlined,
   DollarOutlined, TruckOutlined, UserOutlined, LogoutOutlined,
   SettingOutlined, BellOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
-  AppstoreOutlined, ExclamationCircleOutlined,
+  AppstoreOutlined, ExclamationCircleOutlined, RollbackOutlined,
   BarChartOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '../store/authStore';
@@ -22,12 +22,14 @@ const adminMenuItems = [
   { key: '/caja', icon: <DollarOutlined />, label: 'Caja' },
   { key: '/proveedores', icon: <TruckOutlined />, label: 'Proveedores' },
   { key: '/clientes', icon: <UserOutlined />, label: 'Clientes' },
+  { key: '/devoluciones', icon: <RollbackOutlined />, label: 'Devoluciones' },
 ];
 
 const cajeroMenuItems = [
   { key: '/ventas', icon: <ShoppingCartOutlined />, label: 'Punto de Venta' },
   { key: '/caja', icon: <DollarOutlined />, label: 'Caja' },
   { key: '/clientes', icon: <UserOutlined />, label: 'Clientes' },
+  { key: '/devoluciones', icon: <RollbackOutlined />, label: 'Devoluciones' },
 ];
 
 const inventarioMenuItems = [

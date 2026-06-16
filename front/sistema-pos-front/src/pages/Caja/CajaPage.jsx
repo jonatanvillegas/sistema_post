@@ -13,7 +13,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import dayjs from 'dayjs';
 import { 
-  getCajaActual, abrirCaja, getHistorialCaja, registrarEgreso, exportTransaccionesCaja
+  getCajaActual, abrirCaja, getHistorialCaja, registrarIngreso, registrarEgreso, exportTransaccionesCaja
 } from '../../api/caja.api';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 import { useCajaStore } from '../../store/cajaStore';
@@ -30,13 +30,17 @@ export default function CajaPage() {
   const [filtrosHistorial, setFiltrosHistorial] = useState({ desde: null, hasta: null, page: 1 });
   const [stats, setStats] = useState(null);
   const [isModalAbrirVisible, setIsModalAbrirVisible] = useState(false);
+  const [isModalIngresoVisible, setIsModalIngresoVisible] = useState(false);
   const [isModalEgresoVisible, setIsModalEgresoVisible] = useState(false);
   const [isModalDetalleVisible, setIsModalDetalleVisible] = useState(false);
   const [selectedCajaHistorial, setSelectedCajaHistorial] = useState(null);
   const [loadingReporte, setLoadingReporte] = useState(false);
+  const [loadingIngreso, setLoadingIngreso] = useState(false);
   const [loadingEgreso, setLoadingEgreso] = useState(false);
   
-  const [form] = Form.useForm();
+  const [formAbrir] = Form.useForm();
+  const [formIngreso] = Form.useForm();
+  const [formEgreso] = Form.useForm();
   const { cajaActual, setCajaActual, limpiarCaja } = useCajaStore();
   const { isAdmin, isCajero } = useAuthStore();
 
@@ -96,12 +100,28 @@ export default function CajaPage() {
       await registrarEgreso(values);
       toast.success('Egreso registrado correctamente');
       setIsModalEgresoVisible(false);
-      form.resetFields();
+      formEgreso.resetFields();
       fetchCajaActual();
     } catch (err) {
       toast.error(err.response?.data?.mensaje || 'Error al registrar egreso');
     } finally {
       setLoadingEgreso(false);
+    }
+  };
+
+  const handleIngreso = async (values) => {
+    if (loadingIngreso) return;
+    setLoadingIngreso(true);
+    try {
+      await registrarIngreso(values);
+      toast.success('Ingreso registrado correctamente');
+      setIsModalIngresoVisible(false);
+      formIngreso.resetFields();
+      fetchCajaActual();
+    } catch (err) {
+      toast.error(err.response?.data?.mensaje || 'Error al registrar ingreso');
+    } finally {
+      setLoadingIngreso(false);
     }
   };
 
@@ -164,7 +184,11 @@ export default function CajaPage() {
         <Space direction="vertical" size={0}>
           <Text strong style={{ fontSize: 13 }}>{text}</Text>
           <Text type="secondary" style={{ fontSize: 11 }}>
-            {record.tipo === 'venta_credito' ? 'PEDIDO (CRÉDITO)' : record.tipo.toUpperCase()}
+            {record.tipo === 'venta_credito'
+              ? 'PEDIDO (CRÉDITO)'
+              : record.tipo === 'ingreso_externo'
+              ? 'INGRESO EXTERNO'
+              : record.tipo.toUpperCase()}
           </Text>
         </Space>
       )
@@ -275,17 +299,18 @@ export default function CajaPage() {
                          <Row gutter={[12, 12]}>
                             <Col span={12}><Statistic title="Inicial" value={cajaActual.montoInicial} prefix="C$" valueStyle={{ fontSize: 18 }} /></Col>
                             <Col span={12}><Statistic title="Ventas (+)" value={stats?.totalVentas || 0} prefix="C$" valueStyle={{ fontSize: 18, color: '#52c41a' }} /></Col>
+                            <Col span={12}><Statistic title="Ingresos (+)" value={stats?.totalIngresos || 0} prefix="C$" valueStyle={{ fontSize: 18, color: '#13a8a8' }} /></Col>
                             <Col span={12}><Statistic title="Egresos (-)" value={stats?.totalEgresos || 0} prefix="C$" valueStyle={{ fontSize: 18, color: '#f5222d' }} /></Col>
                             <Col span={12}><Statistic title="EN CAJA" value={stats?.saldoActual || 0} prefix="C$" valueStyle={{ fontSize: 20, fontWeight: 800, color: '#1677ff' }} /></Col>
                          </Row>
-                         <Button 
-                          block 
-                          icon={<FallOutlined />} 
-                          style={{ marginTop: 20 }}
-                          onClick={() => setIsModalEgresoVisible(true)}
-                         >
+                         <Space direction="vertical" style={{ width: '100%', marginTop: 20 }}>
+                          <Button block icon={<RiseOutlined />} onClick={() => setIsModalIngresoVisible(true)}>
+                            Registrar Ingreso Externo
+                          </Button>
+                          <Button block icon={<FallOutlined />} onClick={() => setIsModalEgresoVisible(true)}>
                             Registrar Salida / Egreso
-                         </Button>
+                          </Button>
+                         </Space>
                       </Card>
                     </Space>
                   )}
@@ -433,9 +458,9 @@ export default function CajaPage() {
         title="Apertura de Caja"
         open={isModalAbrirVisible}
         onCancel={() => setIsModalAbrirVisible(false)}
-        onOk={() => form.submit()}
+        onOk={() => formAbrir.submit()}
       >
-        <Form form={form} layout="vertical" onFinish={handleAbrirCaja}>
+        <Form form={formAbrir} layout="vertical" onFinish={handleAbrirCaja}>
           <Form.Item name="montoInicial" label="Efectivo Inicial" initialValue={0}>
              <InputNumber 
                style={{ width: '100%' }} 
@@ -443,6 +468,34 @@ export default function CajaPage() {
                formatter={val => `C$ ${val}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
                parser={val => val.replace(/C\$\s?|(,*)/g, '')}
              />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="Registrar Ingreso Externo"
+        open={isModalIngresoVisible}
+        onCancel={() => setIsModalIngresoVisible(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setIsModalIngresoVisible(false)}>
+            Cancelar
+          </Button>,
+          <Button key="submit" type="primary" loading={loadingIngreso} onClick={() => formIngreso.submit()}>
+            Registrar Ingreso
+          </Button>
+        ]}
+      >
+        <Form form={formIngreso} layout="vertical" onFinish={handleIngreso}>
+          <Form.Item name="monto" label="Monto" rules={[{ required: true }]}>
+             <InputNumber 
+               style={{ width: '100%' }} 
+               size="large" 
+               formatter={val => `C$ ${val}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
+               parser={val => val.replace(/C\$\s?|(,*)/g, '')}
+             />
+          </Form.Item>
+          <Form.Item name="concepto" label="Concepto" rules={[{ required: true }]}>
+             <Input />
           </Form.Item>
         </Form>
       </Modal>
@@ -460,13 +513,13 @@ export default function CajaPage() {
             key="submit" 
             type="primary" 
             loading={loadingEgreso} 
-            onClick={() => form.submit()}
+            onClick={() => formEgreso.submit()}
           >
             Registrar Egreso
           </Button>
         ]}
       >
-        <Form form={form} layout="vertical" onFinish={handleEgreso}>
+        <Form form={formEgreso} layout="vertical" onFinish={handleEgreso}>
           <Form.Item name="monto" label="Monto" rules={[{ required: true }]}>
              <InputNumber 
                style={{ width: '100%' }} 

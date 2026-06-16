@@ -16,6 +16,7 @@ import {
   updateProducto,
   deleteProducto,
   getKardex,
+  darBajaStockDanado,
   exportInventarioExcel,
 } from '../../api/inventario.api';
 import { getProveedores } from '../../api/proveedores.api';
@@ -61,12 +62,15 @@ export default function InventarioPage() {
   const [stockBajoFilter, setStockBajoFilter] = useState(false);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isKardexVisible, setIsKardexVisible] = useState(false);
+  const [isDanadoVisible, setIsDanadoVisible] = useState(false);
   const [kardexData, setKardexData] = useState([]);
   const [editingProducto, setEditingProducto] = useState(null);
   const [form] = Form.useForm();
+  const [formDanado] = Form.useForm();
   const { isAdmin, hasAnyRole } = useAuthStore();
   const canManage = hasAnyRole(['admin', 'inventario']);
   const [exporting, setExporting] = useState(false);
+  const [loadingDanado, setLoadingDanado] = useState(false);
 
   const [searchParams] = useSearchParams();
 
@@ -404,6 +408,34 @@ export default function InventarioPage() {
     }
   };
 
+  const abrirModalDanado = (producto) => {
+    setEditingProducto(producto);
+    formDanado.setFieldsValue({
+      cantidad: 1,
+      motivo: `Baja de producto dañado: ${producto.nombre}`,
+    });
+    setIsDanadoVisible(true);
+  };
+
+  const handleDarBajaDanado = async (values) => {
+    if (!editingProducto) return;
+    setLoadingDanado(true);
+    try {
+      await darBajaStockDanado(editingProducto._id, values);
+      toast.success('Stock dañado dado de baja');
+      setIsDanadoVisible(false);
+      formDanado.resetFields();
+      fetchData();
+      if (isKardexVisible) {
+        showKardex(editingProducto);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.mensaje || 'Error al dar de baja stock dañado');
+    } finally {
+      setLoadingDanado(false);
+    }
+  };
+
   const columns = [
     {
       title: 'Producto',
@@ -447,7 +479,12 @@ export default function InventarioPage() {
       title: 'Stock',
       dataIndex: 'stock',
       render: (val, record) => (
-        <StockBadge stock={val} stockMinimo={record.stockMinimo} controlaStock={record.controlaStock} />
+        <Space direction="vertical" size={4}>
+          <StockBadge stock={val} stockMinimo={record.stockMinimo} controlaStock={record.controlaStock} />
+          {Number(record.stockDanado || 0) > 0 && (
+            <Tag color="volcano">Dañado: {record.stockDanado}</Tag>
+          )}
+        </Space>
       )
     },
     {
@@ -457,6 +494,11 @@ export default function InventarioPage() {
       render: (_, record) => (
         <Space>
            <Button icon={<HistoryOutlined />} size="small" onClick={() => showKardex(record)}>Kardex</Button>
+           {isAdmin() && Number(record.stockDanado || 0) > 0 && (
+             <Button icon={<ExclamationCircleOutlined />} size="small" danger ghost onClick={() => abrirModalDanado(record)}>
+               Baja Daño
+             </Button>
+           )}
            {canManage && (
              <>
                <Button icon={<EditOutlined />} size="small" type="primary" ghost onClick={() => handleOpenModal(record)} />
@@ -752,6 +794,32 @@ export default function InventarioPage() {
             { title: 'Usuario', dataIndex: 'usuarioId', render: val => val?.nombre }
           ]}
         />
+      </Modal>
+
+      <Modal
+        title={`Dar de baja stock dañado: ${editingProducto?.nombre || ''}`}
+        open={isDanadoVisible}
+        onCancel={() => setIsDanadoVisible(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setIsDanadoVisible(false)}>
+            Cancelar
+          </Button>,
+          <Button key="submit" type="primary" danger loading={loadingDanado} onClick={() => formDanado.submit()}>
+            Dar de baja
+          </Button>,
+        ]}
+      >
+        <Form form={formDanado} layout="vertical" onFinish={handleDarBajaDanado}>
+          <Form.Item label="Disponible dañado">
+            <Text strong>{editingProducto?.stockDanado || 0}</Text>
+          </Form.Item>
+          <Form.Item name="cantidad" label="Cantidad" rules={[{ required: true, message: 'Ingrese la cantidad' }]}>
+            <InputNumber min={1} max={Number(editingProducto?.stockDanado || 0)} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="motivo" label="Motivo" rules={[{ required: true, message: 'Ingrese el motivo' }]}>
+            <Input.TextArea rows={3} />
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   );

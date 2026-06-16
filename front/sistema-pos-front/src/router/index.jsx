@@ -8,6 +8,7 @@ import VentasHistoryPage from '../pages/Ventas/VentasHistoryPage';
 import InventarioPage from '../pages/Inventario/InventarioPage';
 import CajaPage from '../pages/Caja/CajaPage';
 import ProveedoresPage from '../pages/Proveedores/ProveedoresPage';
+import DevolucionesPage from '../pages/Devoluciones/DevolucionesPage';
 import UsuariosPage from '../pages/Usuarios/UsuariosPage';
 import ArqueoPage from '../pages/Caja/ArqueoPage';
 import ClientesPage from '../pages/Clientes/ClientesPage';
@@ -41,6 +42,7 @@ export default function AppRouter() {
               <Route path="/caja" element={<CajaPage />} />
               <Route path="/caja/arqueo" element={<ArqueoPage />} />
               <Route path="/clientes" element={<ClientesPage />} />
+              <Route path="/devoluciones" element={<DevolucionesPage />} />
             </Route>
 
             {/* Encargado de Inventario */}
