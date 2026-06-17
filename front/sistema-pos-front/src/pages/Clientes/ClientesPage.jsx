@@ -60,35 +60,63 @@ export default function ClientesPage() {
     cargarClientes();
   }, [buscar]);
 
+  useEffect(() => () => {
+    if (searchProductosTimeoutRef.current) {
+      clearTimeout(searchProductosTimeoutRef.current);
+    }
+  }, []);
+
   const mergeProductoOptions = (incoming) => {
-    setProductoOptions((prev) => {
-      const byId = new Map(prev.map((item) => [String(item.value), item]));
-      for (const item of incoming) {
-        byId.set(String(item.value), item);
-      }
-      return Array.from(byId.values());
-    });
+    const byId = new Map();
+    for (const item of incoming) {
+      byId.set(String(item.value), item);
+    }
+    setProductoOptions(Array.from(byId.values()));
   };
+
+  const getSelectedProductoOptions = (items = []) => (
+    items
+      .filter((item) => item?.productoId)
+      .map((item) => ({
+        value: item.productoId,
+        label: `${item.nombre}${item.codigo ? ` (${item.codigo})` : ''}`,
+        nombre: item.nombre,
+        codigo: item.codigo || '',
+        precioVenta: Number(item.precioUnitario) || 0,
+      }))
+  );
 
   const handleBuscarProductosCredito = (value = '') => {
     if (searchProductosTimeoutRef.current) {
       clearTimeout(searchProductosTimeoutRef.current);
     }
 
+    const search = String(value || '').trim();
+    const selectedOptions = getSelectedProductoOptions(lineItems);
+
+    if (search.length < 2) {
+      mergeProductoOptions(selectedOptions);
+      setLoadingProductoOptions(false);
+      return;
+    }
+
     searchProductosTimeoutRef.current = setTimeout(async () => {
       setLoadingProductoOptions(true);
       try {
-        const res = await getProductos({ buscar: value, limit: 20 });
+        const res = await getProductos({ buscar: search, limit: 20 });
         const productos = Array.isArray(res.data?.productos) ? res.data.productos : (Array.isArray(res.data) ? res.data : []);
-        mergeProductoOptions(productos.map((p) => ({
-          value: p._id,
-          label: `${p.nombre}${p.codigo ? ` (${p.codigo})` : ''}`,
-          nombre: p.nombre,
-          codigo: p.codigo || '',
-          precioVenta: Number(p.precioVenta) || 0,
-        })));
+        mergeProductoOptions([
+          ...selectedOptions,
+          ...productos.map((p) => ({
+            value: p._id,
+            label: `${p.nombre}${p.codigo ? ` (${p.codigo})` : ''}`,
+            nombre: p.nombre,
+            codigo: p.codigo || '',
+            precioVenta: Number(p.precioVenta) || 0,
+          })),
+        ]);
       } catch {
-        if (!value) setProductoOptions([]);
+        mergeProductoOptions(selectedOptions);
       } finally {
         setLoadingProductoOptions(false);
       }
@@ -201,13 +229,7 @@ export default function ClientesPage() {
       }));
 
       setLineItems(items);
-      mergeProductoOptions(items.map((item) => ({
-        value: item.productoId,
-        label: `${item.nombre}${item.codigo ? ` (${item.codigo})` : ''}`,
-        nombre: item.nombre,
-        codigo: item.codigo || '',
-        precioVenta: Number(item.precioUnitario) || 0,
-      })));
+      mergeProductoOptions(getSelectedProductoOptions(items));
     } catch (err) {
       message.error(err.response?.data?.mensaje || 'Error al cargar venta del crédito');
     } finally {
@@ -555,12 +577,13 @@ export default function ClientesPage() {
                 <Select
                   showSearch
                   style={{ width: '100%' }}
-                  placeholder="Buscar producto..."
+                  placeholder="Escriba al menos 2 letras..."
                   value={record.productoId}
                   filterOption={false}
                   onSearch={handleBuscarProductosCredito}
+                  onFocus={() => handleBuscarProductosCredito('')}
                   loading={loadingProductoOptions}
-                  notFoundContent={loadingProductoOptions ? 'Buscando...' : 'Sin resultados'}
+                  notFoundContent={loadingProductoOptions ? 'Buscando...' : 'Escriba 2 o más letras'}
                   options={productoOptions}
                   onChange={(value) => {
                     const p = productoOptions.find((x) => String(x.value) === String(value));

@@ -127,7 +127,7 @@ const findMongoRestoreExe = () => {
 };
 
 /**
- * Crea un backup de la base de datos MongoDB y lo guarda en C:\Respaldo como ZIP
+ * Crea un backup de la base de datos MongoDB y lo guarda en C:\Respaldo
  */
 exports.crearBackupManual = async (req, res) => {
   try {
@@ -135,8 +135,7 @@ exports.crearBackupManual = async (req, res) => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const backupName = `Respaldo_POS_${timestamp}`;
     const backupFolder = 'C:\\Respaldo';
-    const tempDir = path.join(os.tmpdir(), backupName);
-    const zipPath = path.join(backupFolder, `${backupName}.zip`);
+    const dumpPath = path.join(backupFolder, backupName);
 
     // 1. Asegurar que existe la carpeta C:\Respaldo
     if (!fs.existsSync(backupFolder)) {
@@ -145,7 +144,11 @@ exports.crearBackupManual = async (req, res) => {
 
     console.log(`🚀 Iniciando backup: ${backupName}`);
 
-    // 2. Ejecutar mongodump a una carpeta temporal
+    if (fs.existsSync(dumpPath)) {
+      fs.rmSync(dumpPath, { recursive: true, force: true });
+    }
+
+    // 2. Ejecutar mongodump directamente dentro de C:\Respaldo
     // Intentamos encontrar el ejecutable en la ruta por defecto de Windows si no está en el PATH
     let dumpExe = 'mongodump';
     const defaultWinPath = 'C:\\Program Files\\MongoDB\\Tools\\100\\bin\\mongodump.exe';
@@ -154,7 +157,7 @@ exports.crearBackupManual = async (req, res) => {
       dumpExe = `"${defaultWinPath}"`;
     }
 
-    const dumpCommand = `${dumpExe} --uri="${mongoUri}" --out="${tempDir}"`;
+    const dumpCommand = `${dumpExe} --uri="${mongoUri}" --out="${dumpPath}"`;
     
     try {
       await execPromise(dumpCommand);
@@ -168,26 +171,11 @@ exports.crearBackupManual = async (req, res) => {
 
     // 3. Comprimir la carpeta usando PowerShell (más confiable en Windows que dependencias externas)
     // Compress-Archive -Path "C:\temp\backup" -DestinationPath "C:\Desktop\backup.zip"
-    const zipCommand = `powershell -Command "Compress-Archive -Path '${tempDir}\\*' -DestinationPath '${zipPath}' -Force"`;
-    
-    try {
-      await execPromise(zipCommand);
-    } catch (error) {
-      console.error('Error al comprimir:', error);
-      return res.status(500).json({ 
-        mensaje: 'Error al comprimir el backup.',
-        error: error.message 
-      });
-    }
-
-    // 4. Limpiar carpeta temporal
-    fs.rmSync(tempDir, { recursive: true, force: true });
-
     res.json({
       ok: true,
       mensaje: 'Backup creado exitosamente en C:\\Respaldo',
-      archivo: `${backupName}.zip`,
-      ruta: zipPath
+      archivo: backupName,
+      ruta: dumpPath
     });
 
   } catch (error) {

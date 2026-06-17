@@ -5,7 +5,7 @@ import {
   SafetyCertificateOutlined, 
   HistoryOutlined, 
   CheckCircleOutlined,
-  FileZipOutlined,
+  FolderOpenOutlined,
   DesktopOutlined,
   PrinterOutlined
 } from '@ant-design/icons';
@@ -34,7 +34,7 @@ export default function AjustesPage() {
     try {
       const res = await crearBackup();
       if (res.data.ok) {
-        message.success('Respaldo creado exitosamente en tu Escritorio.');
+        message.success('Respaldo creado exitosamente en C:\\Respaldo.');
         setLastBackup({
           fecha: new Date().toLocaleString(),
           archivo: res.data.archivo,
@@ -189,14 +189,14 @@ export default function AjustesPage() {
                     <div>
                       <Text type="secondary" style={{ fontSize: 12 }}>Archivo generado:</Text>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#0ea5e9' }}>
-                        <FileZipOutlined />
+                        <FolderOpenOutlined />
                         <Text strong style={{ fontSize: 13 }}>{lastBackup.archivo}</Text>
                       </div>
                     </div>
                     <div style={{ background: '#f0fdf4', padding: '8px 12px', borderRadius: 8, border: '1px solid #bbf7d0', marginTop: 8 }}>
                       <Space>
                         <CheckCircleOutlined style={{ color: '#10b981' }} />
-                        <Text style={{ fontSize: 12, color: '#166534' }}>Guardado en Escritorio / POS_Backups</Text>
+                        <Text style={{ fontSize: 12, color: '#166534' }}>{lastBackup.ruta}</Text>
                       </Space>
                     </div>
                   </Space>

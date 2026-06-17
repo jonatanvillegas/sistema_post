@@ -6,8 +6,10 @@ const isControlaStock = (producto) => producto?.controlaStock !== false;
 // @GET /api/inventario
 const getProductos = async (req, res) => {
   try {
-    const { buscar, categoria, stockBajo } = req.query;
+    const { buscar, categoria, stockBajo, limit } = req.query;
     const filtro = { estado: true };
+    const limitNum = Number.parseInt(limit, 10);
+    const queryLimit = Number.isFinite(limitNum) && limitNum > 0 ? Math.min(limitNum, 50) : null;
 
     if (buscar) {
       filtro.$or = [
@@ -22,9 +24,15 @@ const getProductos = async (req, res) => {
       filtro.$expr = { $lte: ['$stock', '$stockMinimo'] };
     }
 
-    const productos = await Producto.find(filtro)
+    let query = Producto.find(filtro)
       .populate('proveedorId', 'nombre')
       .sort({ nombre: 1 });
+
+    if (queryLimit) {
+      query = query.limit(queryLimit);
+    }
+
+    const productos = await query;
 
     res.json(productos);
   } catch (error) {
