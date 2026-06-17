@@ -1,7 +1,6 @@
 const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
 const util = require('util');
 const execPromise = util.promisify(exec);
 
@@ -128,19 +127,18 @@ const findMongoRestoreExe = () => {
 };
 
 /**
- * Crea un backup de la base de datos MongoDB y lo guarda en el escritorio como ZIP
+ * Crea un backup de la base de datos MongoDB y lo guarda en C:\Respaldo como ZIP
  */
 exports.crearBackupManual = async (req, res) => {
   try {
     const mongoUri = process.env.MONGO_URI;
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const backupName = `Respaldo_POS_${timestamp}`;
-    const desktopPath = path.join(os.homedir(), 'Desktop');
-    const backupFolder = path.join(desktopPath, 'POS_Backups');
+    const backupFolder = 'C:\\Respaldo';
     const tempDir = path.join(os.tmpdir(), backupName);
     const zipPath = path.join(backupFolder, `${backupName}.zip`);
 
-    // 1. Asegurar que existe la carpeta en el escritorio
+    // 1. Asegurar que existe la carpeta C:\Respaldo
     if (!fs.existsSync(backupFolder)) {
       fs.mkdirSync(backupFolder, { recursive: true });
     }
@@ -187,7 +185,7 @@ exports.crearBackupManual = async (req, res) => {
 
     res.json({
       ok: true,
-      mensaje: 'Backup creado exitosamente en el escritorio',
+      mensaje: 'Backup creado exitosamente en C:\\Respaldo',
       archivo: `${backupName}.zip`,
       ruta: zipPath
     });
