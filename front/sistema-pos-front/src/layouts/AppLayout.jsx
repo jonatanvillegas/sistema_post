@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
-  Layout, Menu, Avatar, Dropdown, Badge, Typography, Space, Tag,
+  Layout, Menu, Avatar, Dropdown, Badge, Typography, Space, Tag, Grid,
 } from 'antd';
 import {
   DashboardOutlined, ShoppingCartOutlined, InboxOutlined,
@@ -14,6 +14,7 @@ import { useAuthStore } from '../store/authStore';
 import { useCajaStore } from '../store/cajaStore';
 
 const { Sider, Header, Content } = Layout;
+const { useBreakpoint } = Grid;
 
 const adminMenuItems = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: 'Dashboard' },
@@ -45,11 +46,19 @@ const adminItems = [
 ];
 
 export default function AppLayout() {
+  const screens = useBreakpoint();
+  const isMobile = !screens.lg;
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const { usuario, logout, isAdmin, isCajero, isInventario, getHomePath } = useAuthStore();
   const { cajaActual } = useCajaStore();
+
+  useEffect(() => {
+    if (isMobile) {
+      setCollapsed(true);
+    }
+  }, [isMobile]);
 
   const handleMenuClick = ({ key }) => navigate(key);
 
@@ -91,12 +100,20 @@ export default function AppLayout() {
 
   return (
     <Layout className="app-layout" style={{ minHeight: '100vh' }}>
+      {isMobile && !collapsed && (
+        <div className="app-sidebar-backdrop" onClick={() => setCollapsed(true)} />
+      )}
       <Sider
         className="app-sidebar"
         width={220}
-        collapsedWidth={64}
+        collapsedWidth={isMobile ? 0 : 64}
         collapsed={collapsed}
         theme="dark"
+        trigger={null}
+        style={{
+          transform: isMobile && collapsed ? 'translateX(-100%)' : 'translateX(0)',
+          transition: 'transform 0.25s ease, width 0.2s ease',
+        }}
       >
         <div className="sidebar-logo" onClick={() => navigate(getHomePath())}>
           <div className="sidebar-logo-icon">
@@ -132,8 +149,8 @@ export default function AppLayout() {
         )}
       </Sider>
 
-      <Layout style={{ marginLeft: collapsed ? 64 : 220, transition: 'margin-left 0.2s' }}>
-        <Header className="app-header" style={{ left: collapsed ? 64 : 220 }}>
+      <Layout style={{ marginLeft: isMobile ? 0 : collapsed ? 64 : 220, transition: 'margin-left 0.2s' }}>
+        <Header className="app-header" style={{ left: isMobile ? 0 : collapsed ? 64 : 220 }}>
           <div className="header-left">
             <span
               style={{ cursor: 'pointer', fontSize: 18, color: '#595959' }}
@@ -156,7 +173,7 @@ export default function AppLayout() {
                 >
                   {usuario?.nombre?.charAt(0).toUpperCase()}
                 </Avatar>
-                <Space orientation="vertical" size={0} style={{ lineHeight: 1 }}>
+                <Space orientation="vertical" size={0} style={{ lineHeight: 1 }} className="header-user-meta">
                   <Typography.Text strong style={{ fontSize: 13, lineHeight: '16px' }}>
                     {usuario?.nombre}
                   </Typography.Text>

@@ -160,13 +160,6 @@ const updateCreditoVentaProductos = async (req, res) => {
       return res.status(400).json({ mensaje: 'No se puede modificar un crédito anulado' });
     }
 
-    const abonosCount = credito?.abonos?.length || 0;
-    if (abonosCount > 0) {
-      return res.status(400).json({
-        mensaje: 'No se puede modificar la venta de un crédito que ya tiene abonos',
-      });
-    }
-
     const venta = await Venta.findById(credito.ventaId);
     if (!venta) return res.status(404).json({ mensaje: 'Venta asociada no encontrada' });
 
@@ -333,12 +326,21 @@ const updateCreditoVentaProductos = async (req, res) => {
       return res.status(400).json({ mensaje: 'El descuento excede el subtotal; ajuste el descuento antes' });
     }
 
+    const totalAbonado = (credito.abonos || []).reduce((sum, abono) => sum + Number(abono?.monto || 0), 0);
+    if (total < totalAbonado) {
+      return res.status(400).json({
+        mensaje: `El nuevo total no puede ser menor que lo ya abonado (${totalAbonado})`,
+      });
+    }
+
     venta.productos = productosVenta;
     venta.subtotal = subtotal;
     venta.total = total;
     await venta.save();
 
     credito.montoTotal = total;
+    const notaAjuste = `Venta editada el ${new Date().toLocaleString()} por ${req.user?.nombre || 'usuario'}${totalAbonado > 0 ? ` manteniendo abonos por ${totalAbonado}` : ''}.`;
+    credito.notas = credito.notas ? `${credito.notas}\n${notaAjuste}` : notaAjuste;
     await credito.save();
 
     // Sincronizar saldoActual del cliente con agregación (evita desfases)

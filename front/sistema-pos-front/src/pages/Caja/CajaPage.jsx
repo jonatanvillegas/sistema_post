@@ -188,6 +188,8 @@ export default function CajaPage() {
               ? 'PEDIDO (CRÉDITO)'
               : record.tipo === 'ingreso_externo'
               ? 'INGRESO EXTERNO'
+              : record.tipo === 'devolucion_diferencia'
+              ? 'DIFERENCIA DEVOLUCION'
               : record.tipo.toUpperCase()}
           </Text>
         </Space>
@@ -263,6 +265,7 @@ export default function CajaPage() {
       </div>
 
       <Tabs 
+        className="caja-tabs"
         defaultActiveKey="1"
         items={[
           {
@@ -287,7 +290,7 @@ export default function CajaPage() {
                   ) : (
                     <Space direction="vertical" style={{ width: '100%' }} size={16}>
                       <Card bordered={false} className="caja-status-card">
-                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                         <div className="caja-status-head">
                             <Space direction="vertical" size={0}>
                                <Text strong style={{ color: '#52c41a' }}><CheckCircleOutlined /> CAJA ABIERTA</Text>
                                <Text type="secondary" style={{ fontSize: 12 }}>Por: {cajaActual.usuarioApertura?.nombre}</Text>
@@ -296,14 +299,14 @@ export default function CajaPage() {
                             <Button danger type="primary" icon={<LockOutlined />} onClick={() => navigate('/caja/arqueo')}>Cerrar Turno</Button>
                          </div>
                          <Divider style={{ margin: '15px 0' }} />
-                         <Row gutter={[12, 12]}>
-                            <Col span={12}><Statistic title="Inicial" value={cajaActual.montoInicial} prefix="C$" valueStyle={{ fontSize: 18 }} /></Col>
-                            <Col span={12}><Statistic title="Ventas (+)" value={stats?.totalVentas || 0} prefix="C$" valueStyle={{ fontSize: 18, color: '#52c41a' }} /></Col>
-                            <Col span={12}><Statistic title="Ingresos (+)" value={stats?.totalIngresos || 0} prefix="C$" valueStyle={{ fontSize: 18, color: '#13a8a8' }} /></Col>
-                            <Col span={12}><Statistic title="Egresos (-)" value={stats?.totalEgresos || 0} prefix="C$" valueStyle={{ fontSize: 18, color: '#f5222d' }} /></Col>
-                            <Col span={12}><Statistic title="EN CAJA" value={stats?.saldoActual || 0} prefix="C$" valueStyle={{ fontSize: 20, fontWeight: 800, color: '#1677ff' }} /></Col>
+                         <Row gutter={[12, 12]} className="caja-summary-grid">
+                            <Col xs={12} sm={12}><Statistic title="Inicial" value={cajaActual.montoInicial} prefix="C$" valueStyle={{ fontSize: 18 }} /></Col>
+                            <Col xs={12} sm={12}><Statistic title="Ventas (+)" value={stats?.totalVentas || 0} prefix="C$" valueStyle={{ fontSize: 18, color: '#52c41a' }} /></Col>
+                            <Col xs={12} sm={12}><Statistic title="Ingresos (+)" value={stats?.totalIngresos || 0} prefix="C$" valueStyle={{ fontSize: 18, color: '#13a8a8' }} /></Col>
+                            <Col xs={12} sm={12}><Statistic title="Egresos (-)" value={stats?.totalEgresos || 0} prefix="C$" valueStyle={{ fontSize: 18, color: '#f5222d' }} /></Col>
+                            <Col xs={24} sm={24}><Statistic title="EN CAJA" value={stats?.saldoActual || 0} prefix="C$" valueStyle={{ fontSize: 20, fontWeight: 800, color: '#1677ff' }} /></Col>
                          </Row>
-                         <Space direction="vertical" style={{ width: '100%', marginTop: 20 }}>
+                         <Space direction="vertical" className="caja-turno-actions">
                           <Button block icon={<RiseOutlined />} onClick={() => setIsModalIngresoVisible(true)}>
                             Registrar Ingreso Externo
                           </Button>
@@ -324,6 +327,7 @@ export default function CajaPage() {
                       size="middle"
                       locale={{ emptyText: 'Sin movimientos registrados' }}
                       loading={loading}
+                      scroll={{ x: 'max-content' }}
                     />
                   </Card>
                 </Col>
@@ -335,7 +339,7 @@ export default function CajaPage() {
             label: <span><HistoryOutlined /> Historial de Jornadas</span>,
             children: (
               <Card bordered={false}>
-                <div style={{ marginBottom: 20, display: 'flex', gap: 15, alignItems: 'center' }}>
+                <div className="caja-toolbar">
                     <DatePicker.RangePicker 
                         onChange={(dates) => setFiltrosHistorial({ ...filtrosHistorial, desde: dates?.[0], hasta: dates?.[1] })}
                         placeholder={['Fecha Inicio', 'Fecha Fin']}
@@ -348,6 +352,7 @@ export default function CajaPage() {
                   dataSource={historialData.cajas} 
                   rowKey="_id" 
                   loading={loading}
+                  scroll={{ x: 'max-content' }}
                   pagination={{ 
                     total: historialData.total, 
                     current: filtrosHistorial.page,
@@ -383,11 +388,11 @@ export default function CajaPage() {
       >
         {selectedCajaHistorial && (
             <div>
-                <Row gutter={16}>
-                    <Col span={6}><Statistic title="Inicial" value={selectedCajaHistorial.montoInicial} prefix="C$" /></Col>
-                    <Col span={6}><Statistic title="Arqueado" value={selectedCajaHistorial.montoFinal} prefix="C$" valueStyle={{ color: '#1677ff' }} /></Col>
-                    <Col span={6}><Statistic title="Tasa Cambio" value={selectedCajaHistorial.tipoCambio || 36.6} prefix="1$ =" precision={2} valueStyle={{ fontSize: 16 }} /></Col>
-                    <Col span={6}><Statistic title="Diferencia" value={selectedCajaHistorial.diferencia} prefix="C$" valueStyle={{ color: selectedCajaHistorial.diferencia < 0 ? '#f5222d' : '#52c41a' }} /></Col>
+                <Row gutter={[16, 16]} className="caja-detail-grid">
+                    <Col xs={12} md={6}><Statistic title="Inicial" value={selectedCajaHistorial.montoInicial} prefix="C$" /></Col>
+                    <Col xs={12} md={6}><Statistic title="Arqueado" value={selectedCajaHistorial.montoFinal} prefix="C$" valueStyle={{ color: '#1677ff' }} /></Col>
+                    <Col xs={12} md={6}><Statistic title="Tasa Cambio" value={selectedCajaHistorial.tipoCambio || 36.6} prefix="1$ =" precision={2} valueStyle={{ fontSize: 16 }} /></Col>
+                    <Col xs={12} md={6}><Statistic title="Diferencia" value={selectedCajaHistorial.diferencia} prefix="C$" valueStyle={{ color: selectedCajaHistorial.diferencia < 0 ? '#f5222d' : '#52c41a' }} /></Col>
                 </Row>
                 {Number(selectedCajaHistorial.depositoTransferencia || 0) > 0 && (
                   <div style={{ marginTop: 12 }}>
@@ -396,12 +401,13 @@ export default function CajaPage() {
                   </div>
                 )}
                 <Divider orientation="left">Desglose de Billetaje (Arqueo)</Divider>
-                <Row gutter={24}>
-                    <Col span={12}>
+                <Row gutter={[24, 24]} className="caja-billetaje-grid">
+                    <Col xs={24} md={12}>
                         <Title level={5} style={{ fontSize: 14 }}>NIO - Córdobas</Title>
                         <Table 
                             size="small" 
                             pagination={false} 
+                            scroll={{ x: 'max-content' }}
                             rowKey={record => `nio-${record.denominacion}`}
                             dataSource={(selectedCajaHistorial.billetaje || []).filter(b => b.moneda === 'NIO')}
                             columns={[
@@ -420,11 +426,12 @@ export default function CajaPage() {
                             )}
                         />
                     </Col>
-                    <Col span={12}>
+                    <Col xs={24} md={12}>
                         <Title level={5} style={{ fontSize: 14, color: '#52c41a' }}>USD - Dólares</Title>
                         <Table 
                             size="small" 
                             pagination={false} 
+                            scroll={{ x: 'max-content' }}
                             rowKey={record => `usd-${record.denominacion}`}
                             dataSource={(selectedCajaHistorial.billetaje || []).filter(b => b.moneda === 'USD')}
                             columns={[

@@ -767,15 +767,18 @@ export default function InventarioPage() {
             <span>Kardex: {editingProducto?.nombre}</span>
           </Space>
         }
+        className="fullscreen-kardex-modal"
         open={isKardexVisible}
         onCancel={() => setIsKardexVisible(false)}
         footer={null}
-        width={800}
+        width="100vw"
+        style={{ top: 0, paddingBottom: 0 }}
       >
         <Table 
           dataSource={kardexData}
           rowKey="_id"
           size="small"
+          scroll={{ x: 'max-content', y: 'calc(100vh - 190px)' }}
           columns={[
             { title: 'Fecha', dataIndex: 'createdAt', render: val => formatDateTime(val) },
             { 

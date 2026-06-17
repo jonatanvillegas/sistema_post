@@ -98,7 +98,7 @@ const cerrarCaja = async (req, res) => {
       .reduce((sum, i) => sum + toCents(i.monto), 0);
 
     const totalIngresosCents = (caja.ingresos || [])
-      .filter(i => i.tipo === 'ingreso_manual' || i.tipo === 'ingreso_externo')
+      .filter(i => i.tipo === 'ingreso_manual' || i.tipo === 'ingreso_externo' || i.tipo === 'devolucion_diferencia')
       .reduce((sum, i) => sum + toCents(i.monto), 0);
 
     const totalEgresosCents = (caja.egresos || [])
@@ -218,7 +218,7 @@ const getCajaActual = async (req, res) => {
       .reduce((sum, i) => sum + toCents(i.monto), 0);
 
     const totalIngresosCents = (caja.ingresos || [])
-      .filter((i) => i.tipo === 'ingreso_manual' || i.tipo === 'ingreso_externo')
+      .filter((i) => i.tipo === 'ingreso_manual' || i.tipo === 'ingreso_externo' || i.tipo === 'devolucion_diferencia')
       .reduce((sum, i) => sum + toCents(i.monto), 0);
 
     const totalEgresosCents = (caja.egresos || [])

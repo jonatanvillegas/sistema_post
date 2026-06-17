@@ -15,7 +15,7 @@ const itemDevolucionSchema = new mongoose.Schema(
     subtotal: { type: Number, required: true },
     motivo: {
       type: String,
-      enum: ['defectuoso', 'equivocado', 'garantia', 'insatisfecho', 'danado', 'sobrante_obra', 'otro'],
+      enum: ['defectuoso', 'equivocado', 'garantia', 'insatisfecho', 'danado', 'otro'],
       default: 'otro',
     },
     motivoDetalle: { type: String, default: '' },
@@ -24,6 +24,22 @@ const itemDevolucionSchema = new mongoose.Schema(
       enum: ['bueno', 'danado'],
       default: 'bueno',
     },
+  },
+  { _id: false }
+);
+
+const itemCambioSchema = new mongoose.Schema(
+  {
+    productoId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Producto',
+      required: true,
+    },
+    nombre: { type: String, required: true },
+    codigo: { type: String, default: '' },
+    cantidad: { type: Number, required: true, min: 1 },
+    precioUnitario: { type: Number, required: true },
+    subtotal: { type: Number, required: true },
   },
   { _id: false }
 );
@@ -53,13 +69,27 @@ const devolucionSchema = new mongoose.Schema(
       nit: { type: String, default: 'CF' },
     },
     productos: [itemDevolucionSchema],
+    productosCambio: [itemCambioSchema],
     totalDevolucion: {
       type: Number,
       required: true,
     },
+    totalCambio: {
+      type: Number,
+      default: 0,
+    },
+    diferenciaMonto: {
+      type: Number,
+      default: 0,
+    },
+    diferenciaTipo: {
+      type: String,
+      enum: ['sin_diferencia', 'favor_cliente', 'favor_tienda'],
+      default: 'sin_diferencia',
+    },
     tipo: {
       type: String,
-      enum: ['devolucion', 'garantia', 'sobrante_obra'],
+      enum: ['devolucion', 'garantia'],
       default: 'devolucion',
     },
     estado: {
@@ -88,6 +118,16 @@ const devolucionSchema = new mongoose.Schema(
       numero: { type: String, default: '' },
       monto: { type: Number, default: 0 },
       generada: { type: Boolean, default: false },
+    },
+    ingresoCaja: {
+      registrado: { type: Boolean, default: false },
+      cajaId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Caja',
+        default: null,
+      },
+      monto: { type: Number, default: 0 },
+      concepto: { type: String, default: '' },
     },
     garantia: {
       fechaInicioGarantia: { type: Date, default: null },
@@ -125,7 +165,7 @@ const devolucionSchema = new mongoose.Schema(
 devolucionSchema.pre('save', async function (next) {
   if (!this.numeroDevolucion) {
     const count = await mongoose.model('Devolucion').countDocuments();
-    const prefix = this.tipo === 'garantia' ? 'GAR' : this.tipo === 'sobrante_obra' ? 'SOB' : 'DEV';
+    const prefix = this.tipo === 'garantia' ? 'GAR' : 'DEV';
     this.numeroDevolucion = `${prefix}-${String(count + 1).padStart(6, '0')}`;
   }
   next();

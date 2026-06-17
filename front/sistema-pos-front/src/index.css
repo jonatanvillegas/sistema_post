@@ -50,6 +50,14 @@ body {
   box-shadow: 2px 0 8px rgba(0,0,0,0.15);
 }
 
+.app-sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 98;
+}
+
 .sidebar-logo {
   height: 56px;
   display: flex;
@@ -601,6 +609,57 @@ body {
 }
 
 /* ===== CAJA ===== */
+.caja-tabs .ant-tabs-nav {
+  margin-bottom: 16px !important;
+}
+
+.caja-status-card {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  border: 1px solid #d6e4ff;
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+
+.caja-status-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.caja-summary-grid .ant-statistic {
+  height: 100%;
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #edf2f7;
+}
+
+.caja-turno-actions {
+  width: 100%;
+  margin-top: 20px;
+}
+
+.caja-turno-actions .ant-btn {
+  height: 42px;
+}
+
+.caja-toolbar {
+  margin-bottom: 20px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.caja-detail-grid .ant-statistic {
+  height: 100%;
+  padding: 12px;
+  border-radius: 12px;
+  background: #fafcff;
+  border: 1px solid #eef2f6;
+}
+
 .caja-status-open {
   background: linear-gradient(135deg, #f6ffed, #d9f7be);
   border: 1px solid #b7eb8f;
@@ -659,4 +718,409 @@ body {
   gap: 16px;
   font-size: 12px;
   color: #64748b;
+}
+
+.ant-table-wrapper {
+  width: 100%;
+}
+
+.ant-table-content {
+  overflow-x: auto;
+}
+
+.text-nowrap,
+.ant-table-thead > tr > th,
+.ant-table-tbody > tr > td {
+  white-space: nowrap;
+}
+
+.ant-modal .ant-modal-content {
+  border-radius: 16px;
+}
+
+.fullscreen-kardex-modal {
+  max-width: 100vw;
+  margin: 0;
+  padding-bottom: 0;
+}
+
+.fullscreen-kardex-modal .ant-modal-content {
+  min-height: 100vh;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.fullscreen-kardex-modal .ant-modal-header {
+  padding-bottom: 12px;
+}
+
+.fullscreen-kardex-modal .ant-modal-body {
+  flex: 1;
+  min-height: 0;
+  padding-top: 0;
+}
+
+.ant-form-item {
+  margin-bottom: 16px;
+}
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 1200px) {
+  .pos-right {
+    width: 340px;
+  }
+
+  .dashboard-card .ant-card-body {
+    padding: 18px;
+  }
+
+  .caja-status-head {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 992px) {
+  :root {
+    --header-height: 60px;
+  }
+
+  .app-header {
+    padding: 0 14px !important;
+  }
+
+  .page-inner {
+    padding: 18px;
+  }
+
+  .login-page {
+    flex-direction: column;
+  }
+
+  .login-left {
+    padding: 32px 24px 16px;
+  }
+
+  .login-headline {
+    font-size: 34px;
+  }
+
+  .login-right {
+    width: 100%;
+    padding: 20px 24px 32px;
+  }
+
+  .login-card {
+    max-width: 560px;
+    padding: 28px 24px;
+  }
+
+  .pos-layout {
+    flex-direction: column;
+    height: auto;
+    min-height: calc(100vh - var(--header-height));
+  }
+
+  .pos-left {
+    min-height: 52vh;
+  }
+
+  .pos-right {
+    width: 100%;
+    border-left: none;
+    border-top: 1px solid #f0f0f0;
+    box-shadow: none;
+  }
+
+  .pos-products-grid {
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    padding: 12px;
+  }
+
+  .page-header {
+    align-items: flex-start;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-sidebar {
+    z-index: 100;
+    width: 280px !important;
+    max-width: 84vw;
+  }
+
+  .header-right {
+    gap: 10px;
+  }
+
+  .header-user {
+    padding: 2px 4px;
+  }
+
+  .header-user-meta {
+    display: none !important;
+  }
+
+  .page-inner {
+    padding: 14px;
+  }
+
+  .page-header {
+    flex-direction: column;
+    margin-bottom: 16px;
+  }
+
+  .page-header > div:last-child,
+  .page-header .ant-space,
+  .page-header .ant-btn {
+    width: 100%;
+  }
+
+  .page-header .ant-space {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px !important;
+  }
+
+  .page-header .ant-space .ant-btn {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .page-title {
+    font-size: 20px;
+    line-height: 1.2;
+  }
+
+  .page-sub {
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .dashboard-card .ant-card-head {
+    padding: 0 14px;
+    min-height: 48px;
+  }
+
+  .dashboard-card .ant-card-body {
+    padding: 14px;
+  }
+
+  .stat-card-inner {
+    padding: 18px;
+  }
+
+  .stat-value {
+    font-size: 24px;
+  }
+
+  .ant-card {
+    border-radius: 14px;
+  }
+
+  .ant-card-body {
+    padding: 14px;
+  }
+
+  .ant-tabs-tab {
+    padding: 8px 10px !important;
+  }
+
+  .ant-descriptions-bordered .ant-descriptions-item-label,
+  .ant-descriptions-bordered .ant-descriptions-item-content {
+    padding: 10px 12px;
+  }
+
+  .ant-modal {
+    max-width: calc(100vw - 20px);
+    margin: 10px auto;
+  }
+
+  .ant-modal .ant-modal-content {
+    padding: 18px 14px;
+  }
+
+  .ant-modal .ant-modal-header {
+    margin-bottom: 12px;
+  }
+
+  .ant-modal .ant-modal-footer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .ant-modal .ant-modal-footer .ant-btn {
+    flex: 1 1 140px;
+    margin-inline-start: 0 !important;
+  }
+
+  .ant-table {
+    font-size: 12px;
+  }
+
+  .ant-table-cell {
+    padding: 10px 8px !important;
+  }
+
+  .caja-toolbar {
+    align-items: stretch;
+  }
+
+  .caja-toolbar .ant-picker,
+  .caja-toolbar .ant-btn {
+    width: 100%;
+  }
+
+  .caja-summary-grid .ant-col {
+    display: flex;
+  }
+
+  .caja-summary-grid .ant-statistic,
+  .caja-detail-grid .ant-statistic {
+    width: 100%;
+  }
+
+  .ant-pagination {
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .pos-search-bar {
+    padding: 10px 12px;
+  }
+
+  .pos-products-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .pos-product-card {
+    min-height: 118px;
+    padding: 10px;
+  }
+
+  .pos-product-icon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .carrito-header,
+  .carrito-cliente,
+  .carrito-total-section,
+  .carrito-actions {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .carrito-items {
+    padding: 8px 10px;
+  }
+
+  .carrito-item-col {
+    padding: 10px 8px;
+  }
+
+  .carrito-item-meta {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .pos-shortcuts-bar {
+    padding: 10px 12px;
+    gap: 8px;
+    flex-wrap: wrap;
+    line-height: 1.5;
+  }
+
+  .login-brand {
+    margin-bottom: 26px;
+  }
+
+  .login-headline {
+    font-size: 28px;
+  }
+
+  .login-sub {
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 576px) {
+  .sidebar-logo {
+    padding: 0 16px;
+  }
+
+  .app-header {
+    padding: 0 10px !important;
+  }
+
+  .page-inner {
+    padding: 10px;
+  }
+
+  .page-title {
+    font-size: 18px;
+  }
+
+  .dashboard-card .ant-card-head-title {
+    font-size: 14px;
+  }
+
+  .ant-statistic-content {
+    font-size: 20px !important;
+  }
+
+  .ant-statistic-content-value {
+    font-size: inherit;
+  }
+
+  .ant-btn-lg {
+    height: 42px;
+    padding-inline: 14px;
+  }
+
+  .ant-input-lg,
+  .ant-input-number-lg,
+  .ant-select-lg .ant-select-selector {
+    min-height: 42px !important;
+  }
+
+  .pos-products-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pos-product-name {
+    font-size: 11px;
+  }
+
+  .pos-product-price {
+    font-size: 12px;
+  }
+
+  .carrito-actions .ant-btn {
+    height: 54px !important;
+    font-size: 18px !important;
+  }
+
+  .login-left {
+    padding: 24px 16px 8px;
+  }
+
+  .login-right {
+    padding: 16px;
+  }
+
+  .login-card {
+    padding: 22px 16px;
+    border-radius: 14px;
+  }
+
+  .caja-status-head .ant-btn,
+  .caja-turno-actions .ant-btn {
+    width: 100%;
+  }
 }

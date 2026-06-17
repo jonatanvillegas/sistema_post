@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Table, Card, Button, Input, Space, Typography, Tag, 
   Modal, Form, InputNumber, Row, Col, Divider, 
@@ -52,16 +52,47 @@ export default function ClientesPage() {
   const [editLoading, setEditLoading] = useState(false);
   const [editCredito, setEditCredito] = useState(null);
   const [lineItems, setLineItems] = useState([]);
-  const [catalogoProductos, setCatalogoProductos] = useState([]);
+  const [productoOptions, setProductoOptions] = useState([]);
+  const [loadingProductoOptions, setLoadingProductoOptions] = useState(false);
+  const searchProductosTimeoutRef = useRef(null);
 
   useEffect(() => {
     cargarClientes();
   }, [buscar]);
 
-  const ensureCatalogoProductos = async () => {
-    if (catalogoProductos.length > 0) return;
-    const res = await getProductos({ buscar: '', limit: 5000 });
-    setCatalogoProductos(res.data?.productos || res.data || []);
+  const mergeProductoOptions = (incoming) => {
+    setProductoOptions((prev) => {
+      const byId = new Map(prev.map((item) => [String(item.value), item]));
+      for (const item of incoming) {
+        byId.set(String(item.value), item);
+      }
+      return Array.from(byId.values());
+    });
+  };
+
+  const handleBuscarProductosCredito = (value = '') => {
+    if (searchProductosTimeoutRef.current) {
+      clearTimeout(searchProductosTimeoutRef.current);
+    }
+
+    searchProductosTimeoutRef.current = setTimeout(async () => {
+      setLoadingProductoOptions(true);
+      try {
+        const res = await getProductos({ buscar: value, limit: 20 });
+        const productos = Array.isArray(res.data?.productos) ? res.data.productos : (Array.isArray(res.data) ? res.data : []);
+        mergeProductoOptions(productos.map((p) => ({
+          value: p._id,
+          label: `${p.nombre}${p.codigo ? ` (${p.codigo})` : ''}`,
+          nombre: p.nombre,
+          codigo: p.codigo || '',
+          precioVenta: Number(p.precioVenta) || 0,
+        })));
+      } catch {
+        if (!value) setProductoOptions([]);
+      } finally {
+        setLoadingProductoOptions(false);
+      }
+    }, 250);
   };
 
   const getSaldoDisponible = (cliente) => {
@@ -156,7 +187,6 @@ export default function ClientesPage() {
     setEditCredito(null);
     setLineItems([]);
     try {
-      await ensureCatalogoProductos();
       const res = await getCreditoDetalle(creditoRecord._id);
       const credito = res.data;
       setEditCredito(credito);
@@ -171,6 +201,13 @@ export default function ClientesPage() {
       }));
 
       setLineItems(items);
+      mergeProductoOptions(items.map((item) => ({
+        value: item.productoId,
+        label: `${item.nombre}${item.codigo ? ` (${item.codigo})` : ''}`,
+        nombre: item.nombre,
+        codigo: item.codigo || '',
+        precioVenta: Number(item.precioUnitario) || 0,
+      })));
     } catch (err) {
       message.error(err.response?.data?.mensaje || 'Error al cargar venta del crédito');
     } finally {
@@ -411,7 +448,7 @@ export default function ClientesPage() {
                   <Button size="small" onClick={() => openDetalleCredito(record)}>
                     Detalle
                   </Button>
-                  {isAdmin && (record?.abonos?.length || 0) === 0 && record.estado !== 'anulado' && (
+                  {isAdmin && record.estado !== 'anulado' && (
                     <Button size="small" onClick={() => openEditarVentaCredito(record)}>
                       Editar productos
                     </Button>
@@ -497,7 +534,7 @@ export default function ClientesPage() {
           type="warning"
           showIcon
           message="Solo Administrador"
-          description="Esta acción ajusta stock y recalcula el total del crédito. No se permite si ya existen abonos."
+          description={`Esta acción ajusta stock y recalcula el total del crédito manteniendo los abonos ya registrados. No puede dejar el nuevo total por debajo de lo ya abonado (${formatCurrency((editCredito?.abonos || []).reduce((sum, abono) => sum + Number(abono?.monto || 0), 0))}).`}
           style={{ marginBottom: 12 }}
         />
 
@@ -518,20 +555,20 @@ export default function ClientesPage() {
                 <Select
                   showSearch
                   style={{ width: '100%' }}
-                  placeholder="Seleccionar producto"
+                  placeholder="Buscar producto..."
                   value={record.productoId}
-                  optionFilterProp="label"
-                  options={catalogoProductos.map((p) => ({
-                    value: p._id,
-                    label: `${p.nombre}${p.codigo ? ` (${p.codigo})` : ''}`,
-                  }))}
+                  filterOption={false}
+                  onSearch={handleBuscarProductosCredito}
+                  loading={loadingProductoOptions}
+                  notFoundContent={loadingProductoOptions ? 'Buscando...' : 'Sin resultados'}
+                  options={productoOptions}
                   onChange={(value) => {
-                    const p = catalogoProductos.find((x) => x._id === value);
+                    const p = productoOptions.find((x) => String(x.value) === String(value));
                     updateLineItem(record.key, {
                       productoId: value,
                       nombre: p?.nombre || '',
                       codigo: p?.codigo || '',
-                      precioUnitario: Number(record.precioUnitario) > 0 ? record.precioUnitario : Number(p?.precioVenta) || 0,
+                      precioUnitario: Number(record.precioUnitario) > 0 ? record.precioUnitario : Number(p?.precioVenta || 0),
                     });
                   }}
                 />

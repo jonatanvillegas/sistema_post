@@ -35,6 +35,81 @@ const migrations = [
       );
     },
   },
+  {
+    id: '2026-06-16_add_cambios_en_devoluciones',
+    description: 'Agrega campos para cambios de producto y diferencias monetarias en devoluciones.',
+    run: async () => {
+      const Devolucion = require('../modules/devoluciones/devolucion.model');
+
+      await Devolucion.updateMany(
+        { productosCambio: { $exists: false } },
+        {
+          $set: {
+            productosCambio: [],
+            totalCambio: 0,
+            diferenciaMonto: 0,
+            diferenciaTipo: 'sin_diferencia',
+          },
+        }
+      );
+
+      await Devolucion.updateMany(
+        {
+          $or: [
+            { totalCambio: { $exists: false } },
+            { diferenciaMonto: { $exists: false } },
+            { diferenciaTipo: { $exists: false } },
+          ],
+        },
+        {
+          $set: {
+            totalCambio: 0,
+            diferenciaMonto: 0,
+            diferenciaTipo: 'sin_diferencia',
+          },
+        }
+      );
+    },
+  },
+  {
+    id: '2026-06-16_add_ingreso_caja_en_devoluciones',
+    description: 'Inicializa el registro de ingreso en caja para devoluciones con diferencia a favor de la tienda.',
+    run: async () => {
+      const Devolucion = require('../modules/devoluciones/devolucion.model');
+
+      await Devolucion.updateMany(
+        { ingresoCaja: { $exists: false } },
+        {
+          $set: {
+            ingresoCaja: {
+              registrado: false,
+              cajaId: null,
+              monto: 0,
+              concepto: '',
+            },
+          },
+        }
+      );
+    },
+  },
+  {
+    id: '2026-06-16_remove_sobrante_obra_from_devoluciones',
+    description: 'Elimina referencias de sobrante de obra en devoluciones existentes.',
+    run: async () => {
+      const Devolucion = require('../modules/devoluciones/devolucion.model');
+
+      await Devolucion.updateMany(
+        { tipo: 'sobrante_obra' },
+        { $set: { tipo: 'devolucion' } }
+      );
+
+      await Devolucion.collection.updateMany(
+        { 'productos.motivo': 'sobrante_obra' },
+        { $set: { 'productos.$[item].motivo': 'otro' } },
+        { arrayFilters: [{ 'item.motivo': 'sobrante_obra' }] }
+      );
+    },
+  },
 ];
 
 const runMigrations = async () => {
