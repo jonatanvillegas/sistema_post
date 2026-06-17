@@ -160,6 +160,10 @@ const updateCreditoVentaProductos = async (req, res) => {
       return res.status(400).json({ mensaje: 'No se puede modificar un crédito anulado' });
     }
 
+    if (credito.estado === 'pagado') {
+      return res.status(400).json({ mensaje: 'No se puede modificar un crédito pagado' });
+    }
+
     const venta = await Venta.findById(credito.ventaId);
     if (!venta) return res.status(404).json({ mensaje: 'Venta asociada no encontrada' });
 
@@ -174,9 +178,6 @@ const updateCreditoVentaProductos = async (req, res) => {
     let caja = null;
     if (venta.cajaId) {
       caja = await Caja.findById(venta.cajaId);
-      if (caja && caja.estado === 'cerrada') {
-        return res.status(400).json({ mensaje: 'No se puede modificar una venta de una caja cerrada' });
-      }
     }
 
     // Normalizar y validar payload
@@ -338,10 +339,22 @@ const updateCreditoVentaProductos = async (req, res) => {
     venta.total = total;
     await venta.save();
 
-    credito.montoTotal = total;
     const notaAjuste = `Venta editada el ${new Date().toLocaleString()} por ${req.user?.nombre || 'usuario'}${totalAbonado > 0 ? ` manteniendo abonos por ${totalAbonado}` : ''}.`;
-    credito.notas = credito.notas ? `${credito.notas}\n${notaAjuste}` : notaAjuste;
-    await credito.save();
+    const estadoActualizado = credito.estado === 'vencido' ? 'vencido' : 'pendiente';
+    const saldoPendienteActualizado = Math.max(0, total - totalAbonado);
+    const notasActualizadas = credito.notas ? `${credito.notas}\n${notaAjuste}` : notaAjuste;
+
+    await Credito.updateOne(
+      { _id: credito._id },
+      {
+        $set: {
+          montoTotal: total,
+          saldoPendiente: saldoPendienteActualizado,
+          estado: estadoActualizado,
+          notas: notasActualizadas,
+        },
+      }
+    );
 
     // Sincronizar saldoActual del cliente con agregación (evita desfases)
     const saldoActualRecalculado = await recalcularSaldoActualCliente(credito.clienteId, null);

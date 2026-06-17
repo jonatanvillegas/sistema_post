@@ -130,6 +130,11 @@ export default function ClientesPage() {
     return Math.max(0, limite - deuda);
   };
 
+  const totalEditado = lineItems.reduce(
+    (sum, item) => sum + ((Number(item.cantidad) || 0) * (Number(item.precioUnitario) || 0)),
+    0
+  );
+
   const cargarClientes = async () => {
     setLoading(true);
     try {
@@ -564,6 +569,14 @@ export default function ClientesPage() {
           <Button onClick={addLineItem}>Agregar producto</Button>
         </Space>
 
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={`Nuevo total estimado: ${formatCurrency(totalEditado)}`}
+          description="Si cambia el producto, el sistema actualiza automáticamente el precio de ese producto para evitar inconsistencias."
+        />
+
         <Table
           size="small"
           pagination={false}
@@ -591,7 +604,7 @@ export default function ClientesPage() {
                       productoId: value,
                       nombre: p?.nombre || '',
                       codigo: p?.codigo || '',
-                      precioUnitario: Number(record.precioUnitario) > 0 ? record.precioUnitario : Number(p?.precioVenta || 0),
+                      precioUnitario: Number(p?.precioVenta || 0),
                     });
                   }}
                 />
