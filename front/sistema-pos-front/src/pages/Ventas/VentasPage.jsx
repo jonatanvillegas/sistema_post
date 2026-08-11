@@ -93,6 +93,7 @@ export default function VentasPage() {
         await anularVenta(venta._id, { motivo: motivoValue.trim() });
         toast.success('Venta anulada correctamente');
         await loadVentasHistorial({ page: ventasRecientesPage });
+        await fetchProductos();
       },
     });
   };
@@ -377,6 +378,7 @@ export default function VentasPage() {
       });
 
       limpiarPestana();
+      await fetchProductos();
       setIsModalPagoVisible(false);
       setTimeout(() => searchInputRef.current?.focus(), 100);
     } catch (err) {

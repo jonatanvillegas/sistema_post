@@ -15,6 +15,7 @@ import ClientesPage from '../pages/Clientes/ClientesPage';
 import AjustesPage from '../pages/Usuarios/AjustesPage';
 import CategoriasPage from '../pages/Categorias/CategoriasPage';
 import VentasReportePage from '../pages/Admin/VentasReportePage';
+import ContabilidadPage from '../pages/Contabilidad/ContabilidadPage';
 import { useAuthStore } from '../store/authStore';
 
 const HomeRedirect = () => {
@@ -57,6 +58,7 @@ export default function AppRouter() {
               <Route path="/ajustes" element={<AjustesPage />} />
               <Route path="/categorias" element={<CategoriasPage />} />
               <Route path="/ventas-reporte" element={<VentasReportePage />} />
+              <Route path="/contabilidad" element={<ContabilidadPage />} />
             </Route>
 
             <Route path="/" element={<HomeRedirect />} />

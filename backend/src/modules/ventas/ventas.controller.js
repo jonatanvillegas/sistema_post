@@ -4,6 +4,10 @@ const Caja = require('../caja/caja.model');
 const Cliente = require('../clientes/cliente.model');
 const Credito = require('../creditos/credito.model');
 const mongoose = require('mongoose');
+const {
+  crearAsientoVentaSiActivo,
+  anularAsientoPorOrigen,
+} = require('../contabilidad/contabilidad.service');
 
 const isControlaStock = (producto) => producto?.controlaStock !== false;
 
@@ -212,7 +216,7 @@ const createVenta = async (req, res) => {
         throw new Error(`Producto ${item.productoId} no encontrado`);
       }
 
-      if (isControlaStock(producto) && producto.stock < item.cantidad) {
+      if (isControlaStock(producto) && Number(producto.stock || 0) < Number(item.cantidad || 0)) {
         throw new Error(`Stock insuficiente para "${producto.nombre}". Disponible: ${producto.stock}`);
       }
 
@@ -248,14 +252,14 @@ const createVenta = async (req, res) => {
 
       // 3. Descontar stock y registrar en kardex (solo si controla stock)
       if (isControlaStock(producto)) {
-        const stockAnterior = producto.stock;
-        producto.stock -= item.cantidad;
+        const stockAnterior = Number(producto.stock || 0);
+        producto.stock = stockAnterior - qty;
         await producto.save();
 
         await Kardex.create({
           productoId: item.productoId,
           tipo: 'salida',
-          cantidad: item.cantidad,
+          cantidad: qty,
           stockAnterior,
           stockNuevo: producto.stock,
           motivo: 'Venta', // Se actualizará abajo
@@ -360,6 +364,14 @@ const createVenta = async (req, res) => {
 
     await cajaActiva.save();
 
+    // 10. Integración contable opcional: si está desactivada, no hace nada.
+    // Si falla por configuración incompleta, no bloquea la venta ya registrada.
+    try {
+      await crearAsientoVentaSiActivo(venta, req.user._id);
+    } catch (contabilidadError) {
+      console.warn(`[contabilidad] No se pudo generar asiento para venta ${venta.numeroVenta}:`, contabilidadError.message);
+    }
+
     res.status(201).json(venta);
   } catch (error) {
     res.status(500).json({ mensaje: error.message || 'Error al crear venta' });
@@ -459,6 +471,16 @@ const anularVenta = async (req, res) => {
       if (removed === 0) {
         console.warn(`[anularVenta] No se encontró movimiento de caja para la venta ${venta._id} (${venta.numeroVenta})`);
       }
+    }
+
+    try {
+      await anularAsientoPorOrigen({
+        modulo: 'ventas',
+        documentoId: venta._id,
+        motivo: `Venta anulada: ${venta.motivoAnulacion}`,
+      });
+    } catch (contabilidadError) {
+      console.warn(`[contabilidad] No se pudo anular asiento de venta ${venta.numeroVenta}:`, contabilidadError.message);
     }
 
     res.json({ mensaje: 'Venta anulada correctamente', venta });

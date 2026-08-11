@@ -2,6 +2,7 @@ const Devolucion = require('./devolucion.model');
 const Venta = require('../ventas/venta.model');
 const { Producto, Kardex } = require('../inventario/producto.model');
 const Caja = require('../caja/caja.model');
+const { crearAsientoDevolucionSiActivo } = require('../contabilidad/contabilidad.service');
 
 const getDiferenciaTipo = (diferenciaMonto) => {
   if (diferenciaMonto > 0) return 'favor_cliente';
@@ -421,6 +422,12 @@ const aprobarDevolucion = async (req, res) => {
 
     dev.estado = 'completada';
     await dev.save();
+
+    try {
+      await crearAsientoDevolucionSiActivo({ devolucion: dev, usuarioId: req.user._id });
+    } catch (contabilidadError) {
+      console.warn(`[contabilidad] No se pudo generar asiento por devolución ${dev.numeroDevolucion}:`, contabilidadError.message);
+    }
 
     const populated = await Devolucion.findById(dev._id)
       .populate('ventaId', 'numeroVenta total')

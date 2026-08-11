@@ -4,6 +4,7 @@ const Caja = require('../caja/caja.model');
 const Venta = require('../ventas/venta.model');
 const { Producto, Kardex } = require('../inventario/producto.model');
 const mongoose = require('mongoose');
+const { crearAsientoAbonoCreditoSiActivo } = require('../contabilidad/contabilidad.service');
 
 const isControlaStock = (producto) => producto?.controlaStock !== false;
 
@@ -82,6 +83,7 @@ const registrarAbono = async (req, res) => {
 
     // 3. Guardar el crédito
     await credito.save();
+    const abonoRegistrado = credito.abonos[credito.abonos.length - 1];
 
     // 4. Recalcular y sincronizar deuda del cliente (evita desfases)
     const saldoActualRecalculado = await recalcularSaldoActualCliente(credito.clienteId, null);
@@ -99,6 +101,16 @@ const registrarAbono = async (req, res) => {
     });
 
     await cajaActiva.save();
+
+    try {
+      await crearAsientoAbonoCreditoSiActivo({
+        credito,
+        abono: abonoRegistrado,
+        usuarioId: req.user._id,
+      });
+    } catch (contabilidadError) {
+      console.warn(`[contabilidad] No se pudo generar asiento por abono a crédito:`, contabilidadError.message);
+    }
 
     res.json({ mensaje: 'Abono registrado con éxito', credito });
   } catch (error) {

@@ -8,6 +8,10 @@ export const darBajaStockDanado = (id, data) => api.put(`/inventario/${id}/dar-b
 export const createProducto = (data) => api.post('/inventario', data);
 export const updateProducto = (id, data) => api.put(`/inventario/${id}`, data);
 export const deleteProducto = (id) => api.delete(`/inventario/${id}`);
+export const importInventarioMasivo = (data) => api.post('/inventario/import', data);
 
 export const exportInventarioExcel = (params) =>
 	api.get('/inventario/export/excel', { params, responseType: 'blob' });
+
+export const descargarPlantillaImportInventario = () =>
+	api.get('/inventario/import/plantilla', { responseType: 'blob' });

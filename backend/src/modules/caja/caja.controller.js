@@ -1,4 +1,8 @@
 const Caja = require('./caja.model');
+const {
+  crearAsientoIngresoCajaSiActivo,
+  crearAsientoEgresoCajaSiActivo,
+} = require('../contabilidad/contabilidad.service');
 
 const toCents = (value) => Math.round((Number(value) || 0) * 100);
 const fromCents = (cents) => Number((Number(cents || 0) / 100).toFixed(2));
@@ -266,6 +270,13 @@ const registrarIngreso = async (req, res) => {
     caja.ingresos.push({ concepto, monto: montoNum, tipo: 'ingreso_externo' });
     await caja.save();
 
+    const movimiento = caja.ingresos[caja.ingresos.length - 1];
+    try {
+      await crearAsientoIngresoCajaSiActivo({ movimiento, cajaId: caja._id, usuarioId: req.user._id });
+    } catch (contabilidadError) {
+      console.warn(`[contabilidad] No se pudo generar asiento de ingreso de caja:`, contabilidadError.message);
+    }
+
     res.json({ mensaje: 'Ingreso registrado', caja });
   } catch (error) {
     res.status(500).json({ mensaje: 'Error al registrar ingreso', error: error.message });
@@ -276,12 +287,28 @@ const registrarIngreso = async (req, res) => {
 const registrarEgreso = async (req, res) => {
   try {
     const { concepto, monto } = req.body;
+    const montoNum = Number(monto || 0);
+
+    if (!concepto || !String(concepto).trim()) {
+      return res.status(400).json({ mensaje: 'El concepto es requerido' });
+    }
+
+    if (!Number.isFinite(montoNum) || montoNum <= 0) {
+      return res.status(400).json({ mensaje: 'El monto debe ser mayor a cero' });
+    }
 
     const caja = await Caja.findOne({ estado: 'abierta' });
     if (!caja) return res.status(404).json({ mensaje: 'No hay caja abierta' });
 
-    caja.egresos.push({ concepto, monto, tipo: 'egreso' });
+    caja.egresos.push({ concepto, monto: montoNum, tipo: 'egreso' });
     await caja.save();
+
+    const movimiento = caja.egresos[caja.egresos.length - 1];
+    try {
+      await crearAsientoEgresoCajaSiActivo({ movimiento, cajaId: caja._id, usuarioId: req.user._id });
+    } catch (contabilidadError) {
+      console.warn(`[contabilidad] No se pudo generar asiento de egreso de caja:`, contabilidadError.message);
+    }
 
     res.json({ mensaje: 'Egreso registrado', caja });
   } catch (error) {

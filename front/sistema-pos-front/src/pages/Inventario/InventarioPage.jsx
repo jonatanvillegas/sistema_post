@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Table, Card, Button, Input, Space, Typography, Tag, 
-  Modal, Form, InputNumber, Select, Descriptions, Divider, Popconfirm, Badge, Row, Col, Switch
+  Modal, Form, InputNumber, Select, Descriptions, Divider, Popconfirm, Badge, Row, Col, Switch,
+  Upload, Alert
 } from 'antd';
 import { 
   PlusOutlined, SearchOutlined, EditOutlined, 
   DeleteOutlined, HistoryOutlined, ExclamationCircleOutlined,
-  BarcodeOutlined
+  BarcodeOutlined, UploadOutlined
 } from '@ant-design/icons';
 import { toast } from 'react-hot-toast';
 import { useSearchParams } from 'react-router-dom';
@@ -18,6 +19,8 @@ import {
   getKardex,
   darBajaStockDanado,
   exportInventarioExcel,
+  importInventarioMasivo,
+  descargarPlantillaImportInventario,
 } from '../../api/inventario.api';
 import { getProveedores } from '../../api/proveedores.api';
 import { getCategorias } from '../../api/categorias.api';
@@ -28,6 +31,85 @@ import JsBarcode from 'jsbarcode';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
+
+const normalizeHeader = (value) => String(value || '')
+  .trim()
+  .toLowerCase()
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9]+/g, '');
+
+const parseCsvLine = (line, delimiter) => {
+  const cells = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    const next = line[i + 1];
+    if (ch === '"' && inQuotes && next === '"') {
+      current += '"';
+      i += 1;
+    } else if (ch === '"') {
+      inQuotes = !inQuotes;
+    } else if (ch === delimiter && !inQuotes) {
+      cells.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+
+  cells.push(current.trim());
+  return cells;
+};
+
+const parseProductosCsv = (text) => {
+  const clean = String(text || '').replace(/^\uFEFF/, '');
+  const lines = clean.split(/\r?\n/).filter((line) => line.trim());
+  if (lines.length < 2) return [];
+
+  const delimiter = (lines[0].match(/;/g) || []).length > (lines[0].match(/,/g) || []).length ? ';' : ',';
+  const headers = parseCsvLine(lines[0], delimiter).map(normalizeHeader);
+  const aliases = {
+    nombre: ['nombre', 'producto', 'nombredelproducto'],
+    codigo: ['codigo', 'codigobarras', 'codigodebarras', 'codigoopcional'],
+    categoria: ['categoria'],
+    precioCompra: ['preciocompra', 'preciodecompra', 'costo'],
+    margenGanancia: ['margenganancia', 'margen', 'margenporcentaje'],
+    stock: ['stock', 'existencia', 'cantidad'],
+    stockMinimo: ['stockminimo', 'minimo'],
+    controlaStock: ['controlastock', 'controlstock'],
+    descripcion: ['descripcion', 'detalle'],
+  };
+  const findIndex = (key) => headers.findIndex((h) => aliases[key].includes(h));
+  const toNumber = (value) => {
+    const normalized = String(value || '').replace(/C\$/gi, '').replace(/\s/g, '').replace(',', '.');
+    const n = Number(normalized);
+    return Number.isFinite(n) ? n : undefined;
+  };
+
+  return lines.slice(1).map((line, idx) => {
+    const cells = parseCsvLine(line, delimiter);
+    const get = (key) => {
+      const index = findIndex(key);
+      return index >= 0 ? cells[index] : '';
+    };
+
+    return {
+      fila: idx + 2,
+      nombre: get('nombre'),
+      codigo: get('codigo'),
+      categoria: get('categoria') || 'General',
+      precioCompra: toNumber(get('precioCompra')),
+      margenGanancia: toNumber(get('margenGanancia')),
+      stock: toNumber(get('stock')) ?? 0,
+      stockMinimo: toNumber(get('stockMinimo')) ?? 5,
+      controlaStock: !['no', 'false', '0'].includes(String(get('controlaStock') || 'SI').trim().toLowerCase()),
+      descripcion: get('descripcion'),
+    };
+  });
+};
 
 const calcEan13CheckDigit = (base12) => {
   const s = String(base12 || '').replace(/\D/g, '');
@@ -71,6 +153,11 @@ export default function InventarioPage() {
   const canManage = hasAnyRole(['admin', 'inventario']);
   const [exporting, setExporting] = useState(false);
   const [loadingDanado, setLoadingDanado] = useState(false);
+  const [isImportVisible, setIsImportVisible] = useState(false);
+  const [importRows, setImportRows] = useState([]);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const [actualizarExistentes, setActualizarExistentes] = useState(true);
 
   const [searchParams] = useSearchParams();
 
@@ -225,6 +312,65 @@ export default function InventarioPage() {
       toast.error(err?.response?.data?.mensaje || 'Error al descargar Excel');
     } finally {
       setExporting(false);
+    }
+  };
+
+  const handleDownloadPlantilla = async () => {
+    try {
+      const res = await descargarPlantillaImportInventario();
+      const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'plantilla_carga_inventario.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      toast.error('No se pudo descargar la plantilla');
+    }
+  };
+
+  const handleImportFile = (file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const rows = parseProductosCsv(reader.result);
+        if (!rows.length) {
+          toast.error('El archivo no tiene productos para importar');
+          return;
+        }
+        setImportRows(rows);
+        setImportResult(null);
+        toast.success(`${rows.length} filas cargadas para revisar`);
+      } catch (error) {
+        toast.error(error?.message || 'No se pudo leer el CSV');
+      }
+    };
+    reader.readAsText(file, 'utf-8');
+    return false;
+  };
+
+  const handleImportInventario = async () => {
+    if (!importRows.length) {
+      toast.error('Seleccione un archivo CSV primero');
+      return;
+    }
+
+    setImporting(true);
+    try {
+      const res = await importInventarioMasivo({
+        productos: importRows,
+        actualizarExistentes,
+      });
+      setImportResult(res.data);
+      toast.success(`Carga procesada: ${res.data?.resumen?.creados || 0} creados, ${res.data?.resumen?.actualizados || 0} actualizados`);
+      fetchData();
+    } catch (err) {
+      toast.error(err.response?.data?.mensaje || 'Error al importar inventario');
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -526,6 +672,12 @@ export default function InventarioPage() {
             <Button loading={exporting} onClick={handleExportExcel}>
               Descargar Excel
             </Button>
+            <Button onClick={handleDownloadPlantilla}>
+              Plantilla CSV
+            </Button>
+            <Button icon={<UploadOutlined />} onClick={() => setIsImportVisible(true)}>
+              Carga Masiva
+            </Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => handleOpenModal()}>
               Nuevo Producto
             </Button>
@@ -797,6 +949,73 @@ export default function InventarioPage() {
             { title: 'Usuario', dataIndex: 'usuarioId', render: val => val?.nombre }
           ]}
         />
+      </Modal>
+
+      <Modal
+        title="Carga masiva de inventario"
+        open={isImportVisible}
+        onCancel={() => setIsImportVisible(false)}
+        width={900}
+        footer={[
+          <Button key="cancel" onClick={() => setIsImportVisible(false)}>Cerrar</Button>,
+          <Button key="import" type="primary" loading={importing} disabled={!importRows.length} onClick={handleImportInventario}>
+            Importar productos
+          </Button>,
+        ]}
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="El precio de venta se calcula automáticamente"
+          description="En el CSV coloca precio_compra y margen_ganancia. El código de barras es opcional; si queda vacío, luego puedes escanearlo o asignarlo editando el producto."
+        />
+
+        <Space style={{ marginBottom: 12 }} wrap>
+          <Upload beforeUpload={handleImportFile} accept=".csv,text/csv" maxCount={1}>
+            <Button icon={<UploadOutlined />}>Seleccionar CSV</Button>
+          </Upload>
+          <Button onClick={handleDownloadPlantilla}>Descargar plantilla</Button>
+          <Switch
+            checked={actualizarExistentes}
+            onChange={setActualizarExistentes}
+            checkedChildren="Actualizar"
+            unCheckedChildren="Solo crear"
+          />
+        </Space>
+
+        <Table
+          size="small"
+          rowKey={(r) => r.fila}
+          dataSource={importRows.slice(0, 50)}
+          pagination={false}
+          scroll={{ x: 'max-content', y: 260 }}
+          columns={[
+            { title: 'Fila', dataIndex: 'fila', width: 70 },
+            { title: 'Nombre', dataIndex: 'nombre' },
+            { title: 'Código', dataIndex: 'codigo', render: (v) => v || <Tag>Opcional</Tag> },
+            { title: 'Categoría', dataIndex: 'categoria' },
+            { title: 'Compra', dataIndex: 'precioCompra', render: (v) => formatCurrency(v || 0) },
+            { title: 'Margen', dataIndex: 'margenGanancia', render: (v) => `${v ?? 0}%` },
+            { title: 'Stock', dataIndex: 'stock' },
+          ]}
+        />
+
+        {importRows.length > 50 && (
+          <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
+            Mostrando las primeras 50 filas de {importRows.length}.
+          </Text>
+        )}
+
+        {importResult && (
+          <Alert
+            style={{ marginTop: 12 }}
+            type={importResult.resumen?.errores ? 'warning' : 'success'}
+            showIcon
+            message={`Resultado: ${importResult.resumen?.creados || 0} creados, ${importResult.resumen?.actualizados || 0} actualizados, ${importResult.resumen?.errores || 0} errores`}
+            description={(importResult.errores || []).slice(0, 8).map((e) => `Fila ${e.fila}: ${e.mensaje}`).join(' | ') || 'Sin errores.'}
+          />
+        )}
       </Modal>
 
       <Modal

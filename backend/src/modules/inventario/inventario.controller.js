@@ -1,7 +1,23 @@
 const { Producto, Kardex } = require('./producto.model');
 const ExcelJS = require('exceljs');
+const { crearAsientoInventarioSiActivo } = require('../contabilidad/contabilidad.service');
 
 const isControlaStock = (producto) => producto?.controlaStock !== false;
+
+const round2 = (n) => Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100;
+
+const calcPrecioVentaFromMargen = (precioCompra, margenGanancia) => {
+  const pc = Number(precioCompra);
+  const margen = Number(margenGanancia);
+  if (!Number.isFinite(pc) || pc < 0) return null;
+  if (!Number.isFinite(margen) || margen < 0 || margen >= 100) return null;
+  return round2(pc / (1 - margen / 100));
+};
+
+const normalizeOptionalCode = (codigo) => {
+  const value = String(codigo ?? '').trim();
+  return value ? value : undefined;
+};
 
 // @GET /api/inventario
 const getProductos = async (req, res) => {
@@ -89,7 +105,7 @@ const darBajaStockDanado = async (req, res) => {
     producto.stockDanado = stockDanadoActual - qty;
     await producto.save();
 
-    await Kardex.create({
+    const kardex = await Kardex.create({
       productoId: producto._id,
       tipo: 'ajuste',
       cantidad: qty,
@@ -98,6 +114,12 @@ const darBajaStockDanado = async (req, res) => {
       motivo: motivo || 'Baja de producto dañado',
       usuarioId: req.user._id,
     });
+
+    try {
+      await crearAsientoInventarioSiActivo({ producto, kardex, usuarioId: req.user._id });
+    } catch (contabilidadError) {
+      console.warn(`[contabilidad] No se pudo generar asiento por baja de inventario:`, contabilidadError.message);
+    }
 
     res.json({ mensaje: 'Producto dañado dado de baja correctamente', producto });
   } catch (error) {
@@ -109,6 +131,8 @@ const darBajaStockDanado = async (req, res) => {
 const createProducto = async (req, res) => {
   try {
     const payload = { ...req.body };
+    payload.codigo = normalizeOptionalCode(payload.codigo);
+    if (!payload.codigo) delete payload.codigo;
     if (payload.controlaStock === false) {
       payload.stock = 0;
       payload.stockMinimo = 0;
@@ -118,7 +142,7 @@ const createProducto = async (req, res) => {
 
     // Registrar en kardex como entrada inicial
     if (isControlaStock(producto) && producto.stock > 0) {
-      await Kardex.create({
+      const kardex = await Kardex.create({
         productoId: producto._id,
         tipo: 'entrada',
         cantidad: producto.stock,
@@ -127,6 +151,12 @@ const createProducto = async (req, res) => {
         motivo: 'Stock inicial',
         usuarioId: req.user._id,
       });
+
+      try {
+        await crearAsientoInventarioSiActivo({ producto, kardex, usuarioId: req.user._id });
+      } catch (contabilidadError) {
+        console.warn(`[contabilidad] No se pudo generar asiento por stock inicial:`, contabilidadError.message);
+      }
     }
 
     res.status(201).json(producto);
@@ -144,6 +174,11 @@ const updateProducto = async (req, res) => {
     const stockAnterior = producto.stock;
 
     const incoming = { ...req.body };
+    incoming.codigo = normalizeOptionalCode(incoming.codigo);
+    if (!incoming.codigo) {
+      delete incoming.codigo;
+      producto.codigo = undefined;
+    }
     if (incoming.controlaStock === false) {
       incoming.stock = 0;
       incoming.stockMinimo = 0;
@@ -155,7 +190,7 @@ const updateProducto = async (req, res) => {
     // Si cambió el stock, registrar en kardex
     if (isControlaStock(producto) && req.body.stock !== undefined && req.body.stock !== stockAnterior) {
       const diferencia = producto.stock - stockAnterior;
-      await Kardex.create({
+      const kardex = await Kardex.create({
         productoId: producto._id,
         tipo: diferencia > 0 ? 'entrada' : 'ajuste',
         cantidad: Math.abs(diferencia),
@@ -164,12 +199,187 @@ const updateProducto = async (req, res) => {
         motivo: req.body.motivoAjuste || 'Ajuste manual',
         usuarioId: req.user._id,
       });
+
+      try {
+        await crearAsientoInventarioSiActivo({ producto, kardex, usuarioId: req.user._id });
+      } catch (contabilidadError) {
+        console.warn(`[contabilidad] No se pudo generar asiento por ajuste de inventario:`, contabilidadError.message);
+      }
     }
 
     res.json({ mensaje: 'Producto actualizado', producto });
   } catch (error) {
     res.status(500).json({ mensaje: 'Error al actualizar producto', error: error.message });
   }
+};
+
+// @POST /api/inventario/import
+// Body: { productos: [{ nombre, codigo?, categoria?, precioCompra, margenGanancia, stock?, stockMinimo?, controlaStock?, descripcion? }], actualizarExistentes?: true }
+const importInventarioMasivo = async (req, res) => {
+  try {
+    const rows = Array.isArray(req.body?.productos) ? req.body.productos : [];
+    const actualizarExistentes = req.body?.actualizarExistentes !== false;
+
+    if (rows.length === 0) {
+      return res.status(400).json({ mensaje: 'Debe enviar al menos un producto para importar' });
+    }
+
+    const errores = [];
+    const creados = [];
+    const actualizados = [];
+    const codigosEnArchivo = new Set();
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i] || {};
+      const fila = Number(row.fila || i + 2);
+      const nombre = String(row.nombre || '').trim();
+      const codigo = normalizeOptionalCode(row.codigo);
+      const precioCompra = Number(row.precioCompra);
+      const margenGanancia = Number(row.margenGanancia);
+      const precioVenta = calcPrecioVentaFromMargen(precioCompra, margenGanancia);
+      const controlaStock = row.controlaStock === false || String(row.controlaStock || '').toLowerCase() === 'no' ? false : true;
+      const stock = controlaStock ? Number(row.stock || 0) : 0;
+      const stockMinimo = controlaStock ? Number(row.stockMinimo ?? 5) : 0;
+
+      if (!nombre) {
+        errores.push({ fila, mensaje: 'El nombre es requerido' });
+        continue;
+      }
+      if (codigo) {
+        if (codigosEnArchivo.has(codigo)) {
+          errores.push({ fila, mensaje: `Código repetido en el archivo: ${codigo}` });
+          continue;
+        }
+        codigosEnArchivo.add(codigo);
+      }
+      if (precioVenta === null) {
+        errores.push({ fila, mensaje: 'Precio compra o margen inválido. El margen debe estar entre 0 y 99' });
+        continue;
+      }
+      if (!Number.isFinite(stock) || stock < 0 || !Number.isFinite(stockMinimo) || stockMinimo < 0) {
+        errores.push({ fila, mensaje: 'Stock o stock mínimo inválido' });
+        continue;
+      }
+
+      try {
+        let producto = codigo ? await Producto.findOne({ codigo }) : null;
+        const payload = {
+          nombre,
+          precioCompra,
+          precioVenta,
+          stock,
+          stockMinimo,
+          controlaStock,
+          categoria: String(row.categoria || 'General').trim() || 'General',
+          descripcion: String(row.descripcion || '').trim(),
+          estado: true,
+        };
+        if (codigo) payload.codigo = codigo;
+        if (row.proveedorId) payload.proveedorId = row.proveedorId;
+
+        if (producto && actualizarExistentes) {
+          const stockAnterior = Number(producto.stock || 0);
+          Object.assign(producto, payload);
+          await producto.save();
+
+          const diferencia = Number(producto.stock || 0) - stockAnterior;
+          if (isControlaStock(producto) && diferencia !== 0) {
+            const kardex = await Kardex.create({
+              productoId: producto._id,
+              tipo: diferencia > 0 ? 'entrada' : 'ajuste',
+              cantidad: Math.abs(diferencia),
+              stockAnterior,
+              stockNuevo: producto.stock,
+              motivo: 'Carga masiva de inventario',
+              usuarioId: req.user._id,
+            });
+
+            try {
+              await crearAsientoInventarioSiActivo({ producto, kardex, usuarioId: req.user._id });
+            } catch (contabilidadError) {
+              console.warn(`[contabilidad] No se pudo generar asiento por carga masiva:`, contabilidadError.message);
+            }
+          }
+
+          actualizados.push({ fila, id: producto._id, nombre: producto.nombre, codigo: producto.codigo || '' });
+          continue;
+        }
+
+        if (producto && !actualizarExistentes) {
+          errores.push({ fila, mensaje: `Ya existe un producto con código ${codigo}` });
+          continue;
+        }
+
+        producto = await Producto.create(payload);
+        if (isControlaStock(producto) && Number(producto.stock || 0) > 0) {
+          const kardex = await Kardex.create({
+            productoId: producto._id,
+            tipo: 'entrada',
+            cantidad: producto.stock,
+            stockAnterior: 0,
+            stockNuevo: producto.stock,
+            motivo: 'Carga masiva de inventario',
+            usuarioId: req.user._id,
+          });
+
+          try {
+            await crearAsientoInventarioSiActivo({ producto, kardex, usuarioId: req.user._id });
+          } catch (contabilidadError) {
+            console.warn(`[contabilidad] No se pudo generar asiento por carga masiva:`, contabilidadError.message);
+          }
+        }
+
+        creados.push({ fila, id: producto._id, nombre: producto.nombre, codigo: producto.codigo || '' });
+      } catch (error) {
+        errores.push({ fila, mensaje: error.message });
+      }
+    }
+
+    res.json({
+      mensaje: 'Carga masiva procesada',
+      resumen: {
+        recibidos: rows.length,
+        creados: creados.length,
+        actualizados: actualizados.length,
+        errores: errores.length,
+      },
+      creados,
+      actualizados,
+      errores,
+    });
+  } catch (error) {
+    res.status(500).json({ mensaje: 'Error al importar inventario', error: error.message });
+  }
+};
+
+// @GET /api/inventario/import/plantilla
+const descargarPlantillaImportInventario = async (_req, res) => {
+  const header = [
+    'nombre',
+    'codigo_opcional',
+    'categoria',
+    'precio_compra',
+    'margen_ganancia',
+    'stock',
+    'stock_minimo',
+    'controla_stock',
+    'descripcion',
+  ].join(',');
+  const ejemplo = [
+    'Producto ejemplo',
+    '',
+    'General',
+    '100',
+    '30',
+    '10',
+    '5',
+    'SI',
+    'Código de barras opcional; el precio de venta se calcula con el margen',
+  ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',');
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="plantilla_carga_inventario.csv"');
+  res.send(`\ufeff${header}\n${ejemplo}`);
 };
 
 // @DELETE /api/inventario/:id  (desactivar)
@@ -291,5 +501,7 @@ module.exports = {
   updateProducto,
   deleteProducto,
   getKardex,
+  importInventarioMasivo,
+  descargarPlantillaImportInventario,
   exportInventarioExcel,
 };
